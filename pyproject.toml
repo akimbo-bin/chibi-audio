@@ -8,6 +8,9 @@ version = "0.0.1"
 description = "Read-only Ableton project intelligence and future Chibi production tooling"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+analysis = ["numpy>=1.26"]
+
 [project.scripts]
 chibi-audio = "chibi_audio.cli:main"
 
