@@ -10,6 +10,7 @@ The objective is to make an AI worker useful inside an existing human-made produ
 - indexing and organizing sample libraries;
 - naming, grouping, and color-coding tracks consistently;
 - mapping tracks, groups, routing, sidechains, devices, and automation;
+- auditing sidechain relationships as explicit source -> target edges, estimating appropriate frequency/depth/timing behavior, routing them consistently across tracks and buses, and verifying from captured audio that the intended ducking actually occurred;
 - finding masking, resonances, harshness, low-end collisions, and stereo problems;
 - distinguishing source problems from artifacts introduced later by track, bus or master processing;
 - reasoning about perceptual audibility rather than relying only on spectrum and loudness numbers;
@@ -23,6 +24,8 @@ The objective is to make an AI worker useful inside an existing human-made produ
 - learning durable production conventions and plugin knowledge rather than guessing from generic advice.
 
 The long-term analysis goal is a **synthetic hearing stack**: structured Ableton state, aligned source/track/bus/master captures, deterministic DSP measurements, psychoacoustic and masking evidence, playback-translation profiles, reference tracks, semantic audio features and real listening validation. No individual sensor is treated as musical truth. The reasoning model integrates these senses into testable production hypotheses.
+
+Sidechain analysis is one important example of why the stack needs both project state and audio evidence. Knowing that a compressor, Trackspacer-like spectral processor or volume shaper is routed to a kick/snare/vocal is not enough: Chibi should be able to measure the real gain or spectral-reduction envelope, its timing relative to the trigger, the residual collision after processing, any recovered downstream headroom, and whether the routing still matches the producer's intent.
 
 ## What it is not
 
@@ -57,7 +60,7 @@ For goal-level requests where the artist explicitly authorizes iteration, Chibi 
 8. update the hypothesis from the new evidence and continue;
 9. stop when the target is satisfied, no useful improvement remains, quality regresses, confidence becomes insufficient, the budget is exhausted, or artist judgment is required.
 
-For loudness work in particular, Chibi should reason about a **clean-loudness knee** rather than maximizing LUFS blindly: the point where more master drive increasingly produces crest collapse, bass flattening, pumping, harshness, clipping or cross-band distortion instead of useful perceived loudness.
+For loudness work in particular, Chibi should reason about a **clean-loudness knee** rather than maximizing LUFS blindly: the point where more master drive increasingly produces crest collapse, bass flattening, pumping, harshness, clipping or cross-band distortion instead of useful perceived loudness. Sidechain changes are a first-class upstream strategy in that search when time-frequency collisions are creating the loudness bottleneck.
 
 The artist remains the authority on whether a subjective change actually sounds better.
 
@@ -71,6 +74,10 @@ A user should eventually be able to say things like:
 - "Find where the vocal and synth are masking and create two reversible fixes for me to audition."
 - "These hats get crispy in my car. Tell me which exact layers or processors are causing it and make two bounded fixes."
 - "Will this bass still be obvious on a phone? Show me which harmonics survive and what masks them."
+- "Audit all my sidechains. Tell me which buses are ducking from the wrong source, which ones are doing nothing, and whether anything is being over-ducked twice."
+- "Set the kick/bass sidechain so the kick gets clean low-end space without unnecessarily chopping the bass, and prove how much headroom it recovered."
+- "Add snare clearance to the groups that actually mask it, but don't touch groups that already leave enough room."
+- "Make room for the vocal globally using Trackspacer or dynamic EQ where that is more transparent than full-band ducking, then verify the actual reduction on every target."
 - "Make an A/B where the snare also ducks the competing midrange for 80 ms, but leave the bass alone."
 - "Try three ways of getting this drop 2 dB louder and tell me which one preserves the most crest factor and stereo width."
 - "I want to mix and master this track to be loud. Work in reversible waves: change the Live Set, render, analyze against these references, keep the best version, and stop when more loudness would cost too much clarity or punch."
