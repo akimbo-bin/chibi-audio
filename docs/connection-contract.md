@@ -52,7 +52,7 @@ Capture authority does not imply arbitrary device insertion, soloing, routing ed
 9. Finalize the requested musical range deterministically: translate the requested beat interval and transport-start offset to sample indices, crop every aligned tap to that exact interval, and verify equal exact final sample counts.
 10. Fingerprint raw and final artifacts with SHA-256, verify format/sample rate/channel count plus non-zero/silence expectations, run requested analysis, and write one experiment manifest.
 
-The Main/BASS/DRUMS multi-tap path and exact-range finalizer are proven. Tap IDs map artifacts to exact Live signal points; raw playback captures are sample-aligned; and `finalize-capture` turns any documented shared overrun into the same authoritative requested sample interval across all taps. The current exact beat conversion is valid for constant-BPM ranges; tempo automation requires a tempo-map-aware extension. CUA is not a substitute for any missing timing/capture semantic.
+The Main/BASS/DRUMS multi-tap path and exact-range finalizer are proven. Tap IDs map artifacts to exact Live signal points; raw playback captures are sample-aligned; `finalize-capture` turns any documented shared overrun into the same authoritative requested sample interval across all taps; and `capture-session` now performs the whole observe/arm/play/stop/disarm/finalize/provenance sequence as one bounded operation. The current exact beat conversion is valid for constant-BPM ranges; tempo automation requires a tempo-map-aware extension. CUA is not a substitute for any missing timing/capture semantic.
 ## Effect certainty
 Mutations and capture control use the same certainty principle as Chibi Core:
 - `NOT_STARTED`: no command/effect was issued.
