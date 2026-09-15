@@ -18,7 +18,9 @@ Callers request only the capabilities they need:
 - `audio.stereo.bands`
 - `audio.loudness`
 - `audio.mir.onsets`
+- `audio.mir.beats`
 - `audio.mir.tonal`
+- `audio.mir.key`
 - `audio.mir.structure`
 - `audio.mir.pitch`
 - `audio.mir.transcription` (optional Basic Pitch, EXPENSIVE)
@@ -37,6 +39,8 @@ Before reusing the recorded SHA-256, the manifest adapter reconciles the current
 `AudioAnalysisService.analyze(..., content_sha256=...)` then accepts the already-proven capture digest, so normal analysis does not need to hash a large finalized capture a second time.
 
 Analysis can also be bounded by exact `start_seconds` / `end_seconds`. PR #7 can later resolve an Ableton locator or named section to a range and pass only the desired audio window to this layer. This layer does not read or mutate the Live Set itself.
+
+`align_capture_events(...)` is a zero-DSP second-stage primitive over already-computed multi-tap reports. It can cluster onset, beat, structure-boundary, strongest-transient, or Basic Pitch note-start evidence across aligned taps within a caller-supplied tolerance. Cluster span is bounded by that tolerance so chained near-events cannot bridge into a falsely broad coincidence. Coincidence is timing evidence only; it does not prove causal source contribution.
 
 ## Cheap and moderate production evidence
 
@@ -57,9 +61,13 @@ The decode context is lazy and shared. A metadata-only request never decodes aud
 The optional librosa adapter remains MODERATE and currently provides:
 
 - onset count/timing/density plus tempo evidence;
+- `audio.mir.beats`: signal-derived beat times, tempo evidence, beat density, median beat interval and interval coefficient-of-variation;
 - normalized chroma profile plus dominant pitch-class evidence;
+- `audio.mir.key`: all 24 major/minor Krumhansl-Schmuckler template candidates ranked from mean chroma, including the top-six candidates and top-vs-second margin;
 - bounded log-mel novelty/change-point candidates plus local-tempo evidence;
 - pYIN monophonic pitch evidence (`audio.mir.pitch`) with voiced fraction, median/range Hz and MIDI evidence, pitch class and voicing confidence.
+
+Beat-grid evidence is not authoritative Ableton transport tempo or meter. Key rankings are candidate evidence, not authoritative project key; ambiguity is expected for sparse, percussive, non-tonal, or modal material.
 
 pYIN is intentionally described as monophonic evidence. It does not claim to transcribe chords or replace source MIDI.
 
@@ -112,7 +120,7 @@ The result ranks those supplied queries by mean cosine similarity and includes m
 
 `compare_reports(left, right, ...)` operates only on already-computed reports. It never reopens audio. This gives Chibi a cheap second-stage primitive for build/drop contrast, pre/post A/B evidence, mix/reference evidence and aligned captured-tap comparisons.
 
-Comparison deltas are explicit `right - left` observations. They never mean better/worse.
+Comparison covers the current production/MIR/model-backed evidence, including beat stability/tempo and key-candidate/chroma similarity when both reports contain those capabilities. Deltas are explicit `right - left` observations. They never mean better/worse.
 
 ## Evidence semantics
 
@@ -123,11 +131,13 @@ The core intentionally separates observations from subjective conclusions:
 - stereo correlation / side energy are evidence, not a width-quality score;
 - broad spectral bands are evidence, not an EQ prescription;
 - librosa dominant pitch-class evidence is not a key claim;
-- librosa tempo evidence is not authoritative Live Set tempo;
+- librosa beat/tempo evidence is not authoritative Live Set tempo or meter;
+- Krumhansl-Schmuckler key ranking is candidate evidence, not authoritative project key;
 - novelty boundaries are not functional song-section labels;
 - pYIN pitch is monophonic evidence, not polyphonic transcription;
 - Basic Pitch output is estimated note evidence, not authoritative MIDI;
-- CLAP cosine similarity is semantic evidence relative to supplied prompts, not probability.
+- CLAP cosine similarity is semantic evidence relative to supplied prompts, not probability;
+- aligned cross-tap event clusters are timing coincidences, not causal attribution.
 
 Float ChibiTap captures can exceed normalized magnitude 1.0. The levels report therefore includes sample-over count/fraction instead of silently clipping the evidence.
 
@@ -145,7 +155,7 @@ This PR does not add the optional model stacks to `pyproject.toml`; PR #7 curren
 
 ## Intended MCP seam
 
-The MCP/control lane should eventually need only a thin call resembling:
+The MCP/control lane should need only a thin call resembling:
 
 ```text
 list_audio_analyzers()
@@ -153,5 +163,7 @@ analyze_audio(artifact_ref, capabilities, max_cost, start_seconds?, end_seconds?
 analyze_capture_manifest(manifest_ref, capabilities, tap_ids?, max_cost)
 compare_analysis_reports(left_report_ref, right_report_ref)
 ```
+
+The existing generic capability field means beat/key support does not require a new analyzer-specific MCP method. Event alignment can likewise remain a small read-only helper over capture-analysis reports once the MCP worker is ready for that seam.
 
 It should not expose analyzer implementation details as workflow authority. Chibi/Core/ChatGPT decides what evidence is needed; this package computes the requested evidence and returns provenance.
