@@ -1,13 +1,17 @@
-# Chibi Audio operator rules
-
-- Preserve artist intent. Do not generate or replace musical material unless explicitly asked.
+﻿# Operator rules
+- Preserve artist intent; do not generate or replace musical material unless explicitly asked.
+- Chibi Core is the eventual workflow authority; this repository supplies production capabilities, not a second scheduler or task database.
 - Observe fresh project state before every mutation batch.
 - Prefer typed Live/bridge operations over GUI automation.
 - Never silently fall back to mouse/keyboard automation when a structured operation fails.
+- Never expose arbitrary Python/eval as a model-facing production capability.
 - Never write `.als` XML directly as a normal editing method.
+- Keep machine-specific paths, private inventory dumps and project/sample metadata out of the public repository unless explicitly sanitized.
 - Snapshot/copy before broad or destructive changes.
+- The KISSKISSKISS original project is not an experiment target; use the lab lineage.
+- Do not guess ambiguous track/device identity or musical role.
 - Make subjective production changes as bounded A/B experiments.
+- Level-match subjective A/B comparisons unless loudness itself is the variable being tested.
 - Numerical targets are evidence, not authority; user listening decides subjective acceptance.
-- Exact track/device identity matters. Do not mutate an object selected only by a stale positional index.
-- Sample-library organization begins read-only; moving or renaming source files requires explicit authorization.
-- Chibi Core is the eventual workflow authority. This repository supplies production capabilities, not a second scheduler or task database.
+- No replay after an unknown effect. Reconcile first.
+- Do not expand platform scope unless the current pilot acceptance boundary requires it.

@@ -1,85 +1,85 @@
-# Architecture
-
+﻿# Architecture
 ## Authority model
-
-Chibi Core is the long-term workflow authority. Chibi Audio supplies typed production capabilities; it must not create a parallel scheduler, task database, or autonomous authority.
-
-## 1. Offline Set Inspector
-
-Read Ableton `.als` files as read-only project snapshots. Live Sets are gzip-compressed XML, which gives us useful durable structure without requiring GUI automation or a running MCP bridge.
-
-Initial data to extract:
-
-- track/group identity, name, color, and hierarchy;
-- routing and sidechain relationships where represented;
-- native devices and third-party plugin references;
-- device-chain order and enabled state;
-- sample/file references;
-- locators, tempo, and arrangement metadata where available.
-
-Normal operation must never write `.als` XML directly. Editing should happen through supported Live control surfaces so Live itself owns serialization and project validity.
-
-## 2. Live Bridge
-
-Use a small Python MIDI Remote Script inside Live 12 to expose the Live Object Model to a localhost-only bridge. Live-facing code stays deliberately small; networking, orchestration, persistence, audio analysis, and AI logic stay outside the DAW process.
-
-We should evaluate and adapt the existing MIT-licensed `jterratsdev/ableton-live-mcp` implementation rather than rebuilding commodity MCP/Remote-Script plumbing from scratch. Chibi-specific safety, project intelligence, plugin/sample knowledge, analysis, and A/B workflows live above that seam.
-
-Max for Live can later provide capabilities that genuinely require Live's audio/control environment, but it should not become the main networking or workflow authority.
-
-## 3. Local MCP / Chibi Adapter
-
-Expose typed, capability-advertised operations such as:
-
-- get project/arrangement/routing/device state;
-- list/search installed devices and Ableton Browser items;
-- read device parameters and automation state;
-- rename and recolor exact tracks/groups;
-- set bounded mixer/device parameters;
-- add/reorder devices where the Live API safely supports it;
-- create or modify automation;
-- create snapshots and restore changed values.
-
-The adapter must fail closed when the Live bridge is unavailable or an operation is unsupported. It must not silently fall back to mouse/keyboard automation.
-
-## 4. Plugin Knowledge Base
-
-Build a machine-local catalog from the user's actual plugin installation and Live-visible devices. Useful fields include:
-
-- vendor, product name, format, version, and path/fingerprint;
-- categories such as EQ, compressor, clipper, distortion, saturation, reverb, delay, modulation, imaging, metering, restoration, synth, sampler, and utility;
+Chibi Core is the eventual workflow authority. Chibi Audio supplies typed production capabilities; it must not create a parallel scheduler, task database, or autonomous authority.
+The DAW bridge is an executor. The analysis stack is evidence. The artist remains the acceptance authority for subjective musical choices.
+## 1. Two project snapshots, one reconciled model
+### Saved snapshot
+Read Ableton `.als` files as read-only durable project snapshots. Extract structure such as track/group hierarchy, device chains, routing data, automation metadata, samples/files, locators and tempo where represented.
+Normal operation never writes `.als` XML directly.
+### Live snapshot
+Read the currently open Set through a small Live 12 Python Remote Script using the Live Object Model. The live snapshot can include unsaved edits that are absent from disk.
+### Reconciliation
+Build a reconciled project graph that records:
+- saved-only state;
+- live-only/unsaved state;
+- confidently matched objects;
+- ambiguous/unresolved matches.
+Do not guess ambiguous object identity. An operation may target only a freshly reconciled exact object.
+## 2. Thin Live bridge
+Use a small Python Remote Script inside Live 12 with a localhost-only transport. Keep networking, persistence, analysis, A/B state and AI reasoning outside the DAW process.
+Research shows that existing Ableton MCP projects already implement much of the commodity bridge surface. We should adapt reviewed patterns rather than adopt an all-powerful upstream server unchanged.
+Initial public capability set is deliberately small:
+- health/version/capability handshake;
+- get song/arrangement metadata;
+- list tracks/groups and routing;
+- list devices and parameter metadata;
+- read mixer/device values;
+- read locators and relevant automation metadata.
+Only after read reconciliation is proven do we add bounded writes such as rename, recolor and exact parameter changes.
+### Explicit exclusions
+- no arbitrary Python/eval capability;
+- no remote network listener beyond localhost;
+- no hidden telemetry;
+- no silent GUI fallback;
+- no autonomous save/overwrite of the artist's only Set.
+## 3. UI accessibility is bootstrap observability, not steady-state authority
+Windows accessibility can currently expose a surprising amount of Live state and is useful for prototyping/verification. It is not the desired primary mutation path because UI layout and focus are less stable than typed Live objects.
+Use UI automation only for operations that genuinely lack a structured seam, and make that fallback explicit.
+## 4. Optional Max for Live audio tap
+Use a small Max for Live device only if we need audio-rate PCM or meter telemetry unavailable through the Remote Script.
+The Max device should stream/measure; it should not own project state, MCP orchestration, planning or durable history.
+## 5. Plugin knowledge base
+Build a machine-local logical-product catalog from the user's actual plugin installation and Live-visible devices.
+Useful fields:
+- vendor/product/version;
+- formats and paths/fingerprints;
+- normalized logical product across VST2/VST3/CLAP duplicates;
+- categories and intended roles;
 - parameter metadata exposed by Live;
-- grounded manuals/documentation when available;
-- user-specific favorites, conventions, and proven use cases.
-
-This should let the assistant answer "what do I own for X?" from reality rather than generic plugin lists.
-
-## 5. Sample Library Index
-
-Start read-only. Index paths and metadata without reorganizing files. Later derive features such as duration, sample rate, channels, BPM estimate, musical key estimate, onset/transient character, spectral profile, and embeddings for semantic similarity/search.
-
-Any future move/rename/deduplication operation must be opt-in, exact-targeted, and reversible where practical because Ableton projects may reference those paths.
-
-## 6. Audio Analysis / Evidence
-
-Analyze the full mix, buses, stems, or local renders by musical section rather than treating an entire song as one average. Useful evidence includes loudness, peak/true peak, crest factor, spectral balance, transient density, stereo width/correlation, masking, and low-end interaction.
-
+- grounded manuals/documentation when useful;
+- user-specific favorites and proven use cases.
+Machine-specific paths and private inventory dumps stay local by default.
+## 6. Sample library index
+Start read-only. Index metadata without reorganizing files. Later derive duration, sample rate, channels, BPM/key estimates, transient/spectral features and semantic embeddings where useful.
+Moving, renaming or deduplicating samples is a separate opt-in capability because existing Live Sets may reference exact paths.
+## 7. Audio evidence layer
+Analyze real renders by musical section, not only whole-song averages.
+Near-term evidence:
+- LUFS and true/sample peak;
+- RMS and crest factor;
+- band energy/spectral balance;
+- transient density;
+- stereo width/correlation and Mid/Side balance;
+- low-end overlap;
+- level-matched A/B deltas.
+A user-supplied reference can be analyzed through the same measurements.
 Metrics are evidence, not musical truth.
-
-## 7. A/B Experiment Engine
-
-Material subjective changes should be expressed as experiments:
-
-- checkpoint state;
-- exact proposed change set;
-- variant A/B identifiers;
-- matched-level comparison when appropriate;
-- metrics before/after;
-- resulting render or playback route;
-- keep, refine, reject, or rollback decision.
-
-This is critical for mixing/mastering because the model should propose useful ranges and testable hypotheses rather than pretend one numerical setting is objectively correct.
-
-## Safety model
-
-Read-only inspection is the default. Before a mutation batch, refresh project state and resolve exact track/device identities. Broad changes require a snapshot. Never delete source material, flatten tracks, overwrite the only copy of a Set, or save over an unknown state automatically. Prefer structured Live/MCP operations over UI automation; UI automation is a last-resort surface for genuinely UI-only actions.
+## 8. Experiment engine
+A material subjective change is an experiment, not an opaque edit.
+Each experiment records:
+- baseline snapshot identifier;
+- exact project/section/targets;
+- hypothesis;
+- exact change set and ranges;
+- observed post-write values;
+- A/B render identifiers;
+- level-matched metrics;
+- user verdict: keep, refine, reject, rollback.
+The experiment engine is the basis for later automated EQ, dynamics, sidechain and mastering exploration.
+## 9. Mutation/effect certainty
+Every write batch follows:
+`REFRESH -> RESOLVE -> CHECKPOINT -> MUTATE -> VERIFY -> MEASURE -> ACCEPT/ROLLBACK`
+If the observed effect cannot be confirmed, effect state is UNKNOWN and the mutation must be reconciled before any replay.
+## 10. Chibi integration
+Once the pilot surface is stable, expose these capabilities through Chibi Core. Core remains the durable planner/task authority; Chibi Audio is a specialized executor + evidence system.
+See [ecosystem-research.md](ecosystem-research.md) for upstream component decisions and [pilot-kisskisskiss.md](pilot-kisskisskiss.md) for the first proof.

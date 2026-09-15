@@ -4,3 +4,5 @@ __pycache__/
 .local/
 *-report.json
 plugin-catalog.json
+
+*.egg-info/
