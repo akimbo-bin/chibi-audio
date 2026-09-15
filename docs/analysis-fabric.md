@@ -13,29 +13,29 @@ Callers request only the capabilities they need:
 - `audio.activity`
 - `audio.stereo`
 - `audio.spectrum`
+- `audio.loudness`
 - `audio.mir.onsets` (optional librosa adapter)
 - `audio.mir.tonal` (optional librosa adapter)
 
-Each analyzer declares:
-
-- exact name/version;
-- capability set;
-- CHEAP / MODERATE / EXPENSIVE cost class;
-- implementation/upstream provenance;
-- license signal;
-- current runtime availability.
+Each analyzer declares exact name/version, capability set, CHEAP / MODERATE / EXPENSIVE cost class, implementation/upstream provenance, license signal, and current runtime availability.
 
 The planner refuses a request when the capability is unavailable or exceeds the caller's cost ceiling. There is no implicit `analyze everything` path.
 
 ## Capture integration
 
-ChibiTap capture finalization already emits exact SHA-256 artifact identities. `AudioAnalysisService.analyze(..., content_sha256=...)` accepts that existing digest, so a caller does not need to hash a large capture again merely to obtain a stable analysis/cache key.
+ChibiTap capture finalization already emits per-artifact path, byte size, modified timestamp and exact SHA-256. `analyze_capture_manifest(...)` consumes that finalized manifest directly and can analyze every tap or an explicit tap subset.
 
-Analysis can be bounded by exact `start_seconds` / `end_seconds`. PR #7 can later resolve an Ableton locator or named section to a time/beat range and pass only the desired audio window to this layer. This layer does not read or mutate the Live Set itself.
+Before reusing the recorded SHA-256, the manifest adapter reconciles the current file's size and modification timestamp against finalization evidence. If the artifact changed or disappeared, analysis fails closed rather than assigning stale cache identity to different bytes.
+
+`AudioAnalysisService.analyze(..., content_sha256=...)` then accepts the already-proven capture digest, so normal analysis does not need to hash a large finalized capture a second time.
+
+Analysis can also be bounded by exact `start_seconds` / `end_seconds`. PR #7 can later resolve an Ableton locator or named section to a time/beat range and pass only the desired audio window to this layer. This layer does not read or mutate the Live Set itself.
 
 ## Compute behavior
 
 Cheap signal capabilities share one decoded NumPy pass. Metadata uses `ffprobe` without decoding the payload. Spectral analysis is MODERATE and samples a bounded number of Hann-window FFT windows rather than building a full spectrogram.
+
+`audio.loudness` is MODERATE and uses an explicit FFmpeg `loudnorm` measurement pass. It reports integrated LUFS, loudness range and FFmpeg's measured true peak for the requested range; those numbers are evidence, not mastering targets.
 
 Stereo spectrum is calculated by averaging channel power after FFT. It does not mono-sum first, because polarity-opposed stereo can cancel in a mono waveform while still containing real spectral energy.
 
@@ -47,6 +47,7 @@ The core intentionally separates observations from subjective conclusions:
 
 - sample peak is not true peak;
 - `true_peak_dbtp` stays null in the NumPy signal analyzer;
+- true peak is populated only by the separately identified FFmpeg loudness analyzer;
 - stereo correlation / side energy are evidence, not a width-quality score;
 - broad spectral bands are evidence, not an EQ prescription;
 - librosa dominant pitch-class evidence is not a key claim;
@@ -77,10 +78,10 @@ No large model is required.
 
 ## Next adapters
 
-1. standards-oriented loudness capability with integrated/short-term LUFS, LRA and a clearly proven true-peak implementation;
+1. short-term/momentary loudness and section-envelope summaries on top of the current integrated loudness evidence;
 2. section/change novelty evidence using librosa primitives;
 3. reference comparison using identical capability/range requests against target and reference artifacts;
-4. event-aligned cross-track evidence once ChibiTap multi-tap capture manifests are available to the caller;
+4. event-aligned cross-track evidence over finalized multi-tap capture manifests;
 5. optional Demucs-backed reference decomposition behind EXPENSIVE cost and explicit request.
 
 ## Intended MCP seam
@@ -90,6 +91,7 @@ The MCP/control lane should eventually need only a thin call resembling:
 ```text
 list_audio_analyzers()
 analyze_audio(artifact_ref, capabilities, max_cost, start_seconds?, end_seconds?)
+analyze_capture_manifest(manifest_ref, capabilities, tap_ids?, max_cost)
 ```
 
 It should not expose analyzer implementation details as workflow authority. Chibi/Core/ChatGPT decides what evidence is needed; this package computes the requested evidence and returns provenance.
