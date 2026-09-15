@@ -178,3 +178,13 @@ This closes the R1.5 range-finality boundary for constant-tempo sections. Tempo-
 The final coordinator now exposes the whole constant-tempo evidence loop as `chibi-audio capture-session`. It resolves each requested Tap ID to an exact Live track/device, verifies the Set signature and Capture-Off state, arms all taps while stopped, runs one bounded typed transport pass, disarms them, waits for stable WAVs, requires equal raw sample counts, then invokes the exact-range finalizer automatically. The same manifest is augmented with the Set signature, song identity/path, actual transport timing, Tap-ID-to-track/device mapping, stable raw artifact hashes and optional analysis.
 
 A live CLI proof used Main/BASS/DRUMS Tap IDs **1 / 2 / 3** over beats **64-68 @ 135 BPM**. The transport-stop RPC overran the requested boundary to about beat **74.845**, but all three raw taps remained exactly aligned at **232,960 samples**. The coordinator then produced three exact **85,333-sample / 1.777770833 s** float32 artifacts for the requested four-beat interval, with distinct SHA-256 fingerprints and one shared experiment manifest. This closes the one-command constant-tempo capture-session boundary; transport overrun remains diagnostic evidence rather than part of the authoritative comparison range.
+
+### In-Live bounded transport proof
+
+The capture-session coordinator now uses typed `capture_transport play_until` so Live owns the requested transport end instead of an external sleep/poll stop command. The exact-range finalizer remains authoritative for the final sample interval.
+
+A fresh four-tap proof used Main/BASS/DRUMS/`38-Serum 2` (Tap IDs **1 / 2 / 3 / 4**) over beats **96-104 @ 135 BPM**. All four raw captures were exactly **175,104 samples / 3.648 s**. Live stopped at about beat **104.179**, reducing the raw overrun to about **0.18 beat**.
+
+The finalizer produced four 48 kHz stereo float32 artifacts at exactly **170,667 samples / 3.5555625 s**, with equal final sample counts, zero raw start offset and distinct SHA-256 fingerprints. Approximate exact-range measurements were Main **-8.13 LUFS / -1.0 dBTP**, BASS **-15.21 LUFS / -2.81 dBTP**, DRUMS **-10.44 LUFS / +3.24 dBTP**, and track 38 **-10.14 LUFS / -0.60 dBTP**.
+
+After the proof, transport was stopped and all four Capture parameters were verified Off. This closes the practical constant-tempo one-command capture loop without Export Audio/Video or steady-state CUA.

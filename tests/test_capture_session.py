@@ -54,6 +54,22 @@ class FakeReadClient:
         raise AssertionError(method)
 
 
+class StaleCaptureReadClient(FakeReadClient):
+    def __init__(self):
+        super().__init__()
+        self.main_capture_reads = 0
+
+    def call(self, method, params):
+        if method == "device_parameters" and int(params["ref"]["id"]) == 101:
+            self.main_capture_reads += 1
+            if self.main_capture_reads == 1:
+                return [
+                    {"name": "Capture", "value": 1.0, "display": "On"},
+                    {"name": "Tap ID", "value": 1 / 9999.0, "display": "1"},
+                ]
+        return super().call(method, params)
+
+
 class FakeCaptureClient:
     instances = []
 
@@ -63,17 +79,31 @@ class FakeCaptureClient:
         self.playing = False
         type(self).instances.append(self)
 
-    def transport(self, action="status", *, time=None, **kwargs):
-        self.calls.append(("transport", action, time, kwargs))
-        if action == "seek":
+    def transport(self, action="status", *, time=None, end_time=None, **kwargs):
+        self.calls.append(("transport", action, time, end_time, kwargs))
+        result = {"playing": self.playing, "time": self.time}
+        if action == "play_until":
             self.time = float(time)
-        elif action == "play":
+            self.end_time = float(end_time)
             self.playing = True
+            result = {
+                "playing": True,
+                "time": self.time,
+                "scheduled_start_time": self.time,
+                "scheduled_end_time": self.end_time,
+            }
         elif action == "status" and self.playing:
-            self.time = 1.0
+            self.time = self.end_time
+            self.playing = False
+            result = {
+                "playing": False,
+                "time": self.time,
+                "last_scheduled_stop_time": self.time,
+            }
         elif action == "stop":
             self.playing = False
-        return {"playing": self.playing, "time": self.time}
+            result = {"playing": False, "time": self.time}
+        return result
 
     def configure_chibitap(self, **kwargs):
         self.calls.append(("configure", kwargs))
@@ -103,6 +133,20 @@ def test_parse_and_resolve_session_taps():
             reader.summary,
             [CaptureSessionTap(1, "Main", "master"), CaptureSessionTap(1, "Bass", "BASS")],
         )
+
+
+def test_resolve_session_taps_rechecks_transient_stale_capture_state(monkeypatch):
+    import chibi_audio.capture_session as session
+
+    reader = StaleCaptureReadClient()
+    monkeypatch.setattr(session.time, "sleep", lambda _seconds: None)
+    resolved = resolve_session_taps(
+        reader,
+        reader.summary,
+        [CaptureSessionTap(1, "Main", "master")],
+    )
+    assert resolved[0].tap_id == 1
+    assert reader.main_capture_reads == 2
 
 
 def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp_path):
@@ -169,4 +213,4 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     assert [call["capture_enabled"] for call in configure_calls] == [True, True, False, False]
     assert all(call["expected_set_signature"] == "sig-1" for call in configure_calls)
     transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
-    assert transport_actions == ["stop", "seek", "play", "status", "stop"]
+    assert transport_actions == ["stop", "play_until", "status"]

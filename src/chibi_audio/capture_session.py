@@ -112,7 +112,17 @@ def resolve_session_taps(
         if capture is None or tap_id_param is None:
             raise CaptureError(f"ChibiTap on {track.get('name')!r} does not expose Capture + Tap ID")
         if float(capture.get("value", 0.0)) >= 0.5:
-            raise CaptureError(f"ChibiTap Capture is already On for {track.get('name')!r}")
+            # Live can briefly report the previous host-parameter value immediately
+            # after a prior session disarms a tap. Re-read once before refusing the
+            # next session; never mutate an unexpectedly armed tap automatically.
+            time.sleep(0.2)
+            params = _parameters_by_name(read_client, int(tap["id"]))
+            capture = params.get("Capture")
+            tap_id_param = params.get("Tap ID")
+            if capture is None or tap_id_param is None:
+                raise CaptureError(f"ChibiTap on {track.get('name')!r} does not expose Capture + Tap ID")
+            if float(capture.get("value", 0.0)) >= 0.5:
+                raise CaptureError(f"ChibiTap Capture is already On for {track.get('name')!r}")
         try:
             observed_tap_id = int(str(tap_id_param.get("display", "")).strip())
         except ValueError as exc:
@@ -211,7 +221,6 @@ def run_capture_session(
 
     try:
         capture_client.transport("stop", expected_set_signature=set_signature)
-        capture_client.transport("seek", time=float(start_beat), expected_set_signature=set_signature)
         for tap in resolved:
             kwargs = tap.configure_kwargs()
             capture_client.configure_chibitap(
@@ -224,28 +233,31 @@ def run_capture_session(
 
         if settle_seconds:
             time.sleep(settle_seconds)
-        play = capture_client.transport("play", expected_set_signature=set_signature)
+        play = capture_client.transport(
+            "play_until",
+            time=float(start_beat),
+            end_time=float(end_beat),
+            expected_set_signature=set_signature,
+        )
         play_started = True
-        transport_start = float(play.get("time", start_beat))
-        if transport_start > float(start_beat) + 1.0e-6:
-            raise CaptureError(
-                f"transport began after requested start: {transport_start} > {start_beat}"
-            )
+        transport_start = float(play.get("scheduled_start_time", start_beat))
 
         deadline = time.monotonic() + expected_seconds + timeout_margin
         while True:
             if time.monotonic() > deadline:
-                raise CaptureError("Live transport did not reach requested end beat before timeout")
+                raise CaptureError("Live transport did not stop at the requested end beat before timeout")
             time.sleep(poll_interval)
             status = capture_client.transport("status", expected_set_signature=set_signature)
-            if not bool(status.get("playing")) and float(status.get("time", 0.0)) < float(end_beat):
+            if bool(status.get("playing")):
+                continue
+            observed_stop = status.get("last_scheduled_stop_time")
+            if observed_stop is None:
+                observed_stop = status.get("time", end_beat)
+            transport_stop = float(observed_stop)
+            play_started = False
+            if transport_stop + 1.0e-6 < float(end_beat):
                 raise CaptureError("Live transport stopped before requested end beat")
-            if float(status.get("time", 0.0)) >= float(end_beat):
-                break
-
-        stopped = capture_client.transport("stop", expected_set_signature=set_signature)
-        play_started = False
-        transport_stop = float(stopped.get("time", end_beat))
+            break
     finally:
         if play_started:
             try:

@@ -960,20 +960,74 @@ class AbletonLiveMCP(ControlSurface):
         track.delete_device(old_index)
         return {"refreshed": True, "old_device_id": old_device_id, "device": {"id": new_id, "name": "ChibiTap"}, "capture": new_capture, "tap_id": self._parameter_summary(tap_id_new[0])}
 
+    def _cancel_capture_transport_range(self):
+        self._capture_transport_generation = getattr(self, "_capture_transport_generation", 0) + 1
+        self._capture_transport_end_time = None
+        return self._capture_transport_generation
+
+    def _schedule_capture_transport_stop(self, song, end_time):
+        self._capture_transport_generation = getattr(self, "_capture_transport_generation", 0) + 1
+        generation = self._capture_transport_generation
+        end_time = float(end_time)
+        self._capture_transport_end_time = end_time
+        self._capture_transport_last_stop_time = None
+
+        def check():
+            if generation != getattr(self, "_capture_transport_generation", 0):
+                return
+            if not bool(getattr(song, "is_playing", False)):
+                self._capture_transport_end_time = None
+                return
+            current = float(getattr(song, "current_song_time", 0.0))
+            if current >= end_time:
+                self._stop_transport(song)
+                self._capture_transport_last_stop_time = float(getattr(song, "current_song_time", current))
+                self._capture_transport_end_time = None
+                return
+            self.schedule_message(1, check)
+
+        self.schedule_message(1, check)
+        return generation
+
     def _rpc_capture_transport(self, params):
         action = params.get("action") or "status"
-        if action not in ("status", "seek", "play", "stop"):
-            raise ValueError("capture_transport action must be status, seek, play, or stop")
+        if action not in ("status", "seek", "play", "stop", "play_until"):
+            raise ValueError("capture_transport action must be status, seek, play, stop, or play_until")
         time_value = params.get("time")
-        if action == "seek" and time_value is None:
-            raise ValueError("seek requires time")
+        end_time = params.get("end_time")
+        if action in ("seek", "play_until") and time_value is None:
+            raise ValueError("%s requires time" % action)
         if time_value is not None and float(time_value) < 0:
             raise ValueError("time must be >= 0")
+        if action == "play_until":
+            if end_time is None:
+                raise ValueError("play_until requires end_time")
+            start_time = float(time_value)
+            end_time = float(end_time)
+            if end_time <= start_time:
+                raise ValueError("end_time must be greater than time for play_until")
+            self._cancel_capture_transport_range()
+            song = self.song()
+            self._seek_song(song, start_time)
+            self._start_transport(song)
+            token = self._schedule_capture_transport_stop(song, end_time)
+            result = self._transport_result(song, "play")
+            result["requested_action"] = action
+            result["scheduled_start_time"] = start_time
+            result["scheduled_end_time"] = end_time
+            result["range_token"] = token
+            return result
+        if action != "status":
+            self._cancel_capture_transport_range()
         forwarded = {"action": "status" if action == "seek" else action}
         if time_value is not None:
             forwarded["time"] = float(time_value)
         result = self._rpc_transport(forwarded)
         result["requested_action"] = action
+        if getattr(self, "_capture_transport_end_time", None) is not None:
+            result["scheduled_end_time"] = self._capture_transport_end_time
+        if getattr(self, "_capture_transport_last_stop_time", None) is not None:
+            result["last_scheduled_stop_time"] = self._capture_transport_last_stop_time
         return result
 
     def _rpc_transport(self, params):

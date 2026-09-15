@@ -287,20 +287,30 @@ class LiveCaptureClient(_LiveTransport):
         action: str = "status",
         *,
         time: float | None = None,
+        end_time: float | None = None,
         expected_set_signature: str | None = None,
         verify_capability: bool = True,
     ) -> dict[str, Any]:
-        if action not in {"status", "seek", "play", "stop"}:
-            raise LiveBridgeError("capture transport action must be status, seek, play, or stop")
-        if action == "seek" and time is None:
-            raise LiveBridgeError("seek requires time")
+        if action not in {"status", "seek", "play", "stop", "play_until"}:
+            raise LiveBridgeError("capture transport action must be status, seek, play, stop, or play_until")
+        if action in {"seek", "play_until"} and time is None:
+            raise LiveBridgeError(f"{action} requires time")
         if time is not None and float(time) < 0:
             raise LiveBridgeError("time must be >= 0")
+        if action == "play_until":
+            if end_time is None:
+                raise LiveBridgeError("play_until requires end_time")
+            if float(end_time) <= float(time):
+                raise LiveBridgeError("end_time must be greater than time for play_until")
+        elif end_time is not None:
+            raise LiveBridgeError("end_time is only valid for play_until")
         if verify_capability:
             self._require_method("capture", "capture_transport")
         params: dict[str, Any] = {"action": action}
         if time is not None:
             params["time"] = float(time)
+        if end_time is not None:
+            params["end_time"] = float(end_time)
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
         return self._request("capture_transport", params)
