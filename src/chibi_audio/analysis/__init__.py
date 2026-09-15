@@ -1,3 +1,4 @@
+from .manifest import CaptureManifestAnalysisError, analyze_capture_manifest
 from .models import (
     BASIC_CAPABILITIES,
     SCHEMA_VERSION,
@@ -20,4 +21,6 @@ __all__ = [
     "AnalyzerDescriptor",
     "AnalyzerRegistry",
     "AudioAnalysisService",
+    "CaptureManifestAnalysisError",
+    "analyze_capture_manifest",
 ]
