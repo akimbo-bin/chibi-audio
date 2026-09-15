@@ -14,10 +14,13 @@ from .mcp_server import (
     build_mcp_server as build_base_mcp_server,
     build_parser,
 )
+from .section_capture import build_section_capture_plan
 from .sections import build_section_map, position_context, resolve_section as resolve_named_section
 
 SectionOccurrence = Annotated[int, Field(ge=1, le=100, strict=True)]
 LocatorLimit = Annotated[int, Field(ge=1, le=4096, strict=True)]
+TapSpec = Annotated[str, Field(min_length=5, max_length=1000)]
+TapSpecList = Annotated[list[TapSpec], Field(max_length=32)]
 
 
 def build_mcp_server(
@@ -100,6 +103,32 @@ def build_mcp_server(
             result["set_signature"] = section_map.get("set_signature")
             result["last_event_time"] = section_map.get("last_event_time")
             return result
+        except Exception as exc:  # noqa: BLE001
+            raise _safe_tool_error(exc) from None
+
+    @server.tool(
+        title="Plan capture of one named song section",
+        description=(
+            "Resolve an artist-authored locator section and build the exact beat-range/tap payload "
+            "for the typed ChibiTap capture-session executor. This tool is planning-only and never "
+            "arms capture, moves transport, starts playback, or writes the Live Set."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def plan_section_capture(
+        name: ObjectName,
+        occurrence: SectionOccurrence | None = None,
+        tap_specs: TapSpecList = [],
+        limit: LocatorLimit = 256,
+    ) -> dict[str, Any]:
+        try:
+            return build_section_capture_plan(
+                fresh_sections(limit),
+                name,
+                occurrence=occurrence,
+                tap_specs=tap_specs,
+            )
         except Exception as exc:  # noqa: BLE001
             raise _safe_tool_error(exc) from None
 
