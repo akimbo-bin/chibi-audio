@@ -93,6 +93,7 @@ With default read-only startup, the server exposes production reads/evidence too
 - `resolve_section`;
 - `get_song_position`;
 - `plan_section_capture`;
+- `plan_section_evidence`;
 - `list_audio_analyzers`;
 - `analyze_audio`;
 - `analyze_capture_manifest`;
@@ -118,10 +119,11 @@ After the tunnel profile is connected to the intended ChatGPT workspace:
 6. Add artist-authored Ableton Locators such as `Intro`, `Build`, `Drop 1`, `Bridge`.
 7. Call `get_sections` and confirm exact beat ranges match the Arrangement.
 8. Call `resolve_section` for one section and confirm the expected start/end beats.
-9. Call `plan_section_capture` with the desired tap specs and require `effect_state=NOT_STARTED`.
-10. Do not enable writes until the active Live Set is free for the coordinated bounded-write proof.
-11. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
-12. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
+9. Call `plan_section_evidence` with the desired tap specs plus an explicit analyzer capability set/cost ceiling and require `effect_state=NOT_STARTED`.
+10. Optionally call `plan_section_capture` for capture-only planning and require `effect_state=NOT_STARTED`.
+11. Do not enable writes until the active Live Set is free for the coordinated bounded-write proof.
+12. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
+13. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 
 Stop if the tool list contains an unexpected generic capability, Live is reachable on a non-loopback interface, analysis can escape the configured artifact root, the tunnel launches a different checkout, or a write-enabled surface appears without the explicit launcher flag.
 
