@@ -19,6 +19,7 @@ The objective is to make an AI worker useful inside an existing human-made produ
 - producing reversible A/B variants so the artist can choose by ear;
 - measuring LUFS, true peak, crest factor, spectral balance, stereo width, psychoacoustic descriptors and other evidence before and after changes;
 - helping with mastering while preserving intentional section-to-section dynamics;
+- running explicitly authorized, bounded iterative mix/master optimization loops that modify the Live Set, render, analyze, keep or roll back, and adapt the next experiment toward a user-defined goal;
 - learning durable production conventions and plugin knowledge rather than guessing from generic advice.
 
 The long-term analysis goal is a **synthetic hearing stack**: structured Ableton state, aligned source/track/bus/master captures, deterministic DSP measurements, psychoacoustic and masking evidence, playback-translation profiles, reference tracks, semantic audio features and real listening validation. No individual sensor is treated as musical truth. The reasoning model integrates these senses into testable production hypotheses.
@@ -28,6 +29,8 @@ The long-term analysis goal is a **synthetic hearing stack**: structured Ableton
 Chibi Audio is not Suno and is not intended to replace composition or generate generic finished songs. It is not a second workflow authority beside Chibi Core. It must not flatten, destructively rewrite, or silently reorganize a Live Set. It is also not intended to become one giant Max for Live patch responsible for networking, persistence, orchestration, analysis, and editing.
 
 It is also not an autonomous declaration engine for whether music objectively `sounds good`. Technical and perceptual evidence can reveal likely problems and predict translation failures, but artistic acceptance remains with the artist.
+
+An iterative optimization mode may decide that one measured candidate is better than another **within an explicit goal contract and guardrails**. It still must not confuse that bounded production judgment with universal musical taste. "Keep optimizing until happy" means until the requested measurable goal is satisfied, progress stalls, a guardrail is hit, or the next decision is subjective enough to require the artist.
 
 ## Interaction model
 
@@ -41,6 +44,20 @@ The default production loop is:
 6. Render, meter, capture or otherwise gather A/B evidence.
 7. Let the artist judge the musical result and, where useful, validate translation on real playback.
 8. Keep, refine, or roll back.
+
+For goal-level requests where the artist explicitly authorizes iteration, Chibi may repeat that loop in bounded waves without requiring approval after every low-risk step:
+
+1. establish a baseline, references, target bundle and experiment budget;
+2. choose the highest-value evidence-backed hypothesis;
+3. checkpoint and apply one coherent reversible change;
+4. render through the authoritative Live path;
+5. analyze level-matched and as-produced results;
+6. keep the candidate only if it improves the best-so-far result without violating guardrails;
+7. roll back losing variants exactly;
+8. update the hypothesis from the new evidence and continue;
+9. stop when the target is satisfied, no useful improvement remains, quality regresses, confidence becomes insufficient, the budget is exhausted, or artist judgment is required.
+
+For loudness work in particular, Chibi should reason about a **clean-loudness knee** rather than maximizing LUFS blindly: the point where more master drive increasingly produces crest collapse, bass flattening, pumping, harshness, clipping or cross-band distortion instead of useful perceived loudness.
 
 The artist remains the authority on whether a subjective change actually sounds better.
 
@@ -56,5 +73,6 @@ A user should eventually be able to say things like:
 - "Will this bass still be obvious on a phone? Show me which harmonics survive and what masks them."
 - "Make an A/B where the snare also ducks the competing midrange for 80 ms, but leave the bass alone."
 - "Try three ways of getting this drop 2 dB louder and tell me which one preserves the most crest factor and stereo width."
+- "I want to mix and master this track to be loud. Work in reversible waves: change the Live Set, render, analyze against these references, keep the best version, and stop when more loudness would cost too much clarity or punch."
 
 That is the product: deep production assistance around the artist's own material, not generated replacement material.
