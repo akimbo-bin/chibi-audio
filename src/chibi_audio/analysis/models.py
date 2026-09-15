@@ -14,6 +14,7 @@ class AnalysisCapability(StrEnum):
     ACTIVITY = "audio.activity"
     STEREO = "audio.stereo"
     SPECTRUM = "audio.spectrum"
+    LOUDNESS = "audio.loudness"
     MIR_ONSETS = "audio.mir.onsets"
     MIR_TONAL = "audio.mir.tonal"
 
