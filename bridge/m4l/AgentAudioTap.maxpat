@@ -64,8 +64,9 @@
         "box": {
           "id": "obj-recorder",
           "maxclass": "newobj",
-          "numinlets": 3,
-          "numoutlets": 0,
+          "numinlets": 2,
+          "numoutlets": 1,
+          "outlettype": ["signal"],
           "patching_rect": [176.0, 216.0, 72.0, 20.0],
           "text": "sfrecord~ 2"
         }

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 import json
 import socket
 from dataclasses import dataclass
@@ -19,7 +19,7 @@ READ_ONLY_METHODS = frozenset(
         "browser_search",
     }
 )
-CAPTURE_METHODS = frozenset({"agent_audio_tap"})
+CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport"})
 BOUNDED_WRITE_METHODS = frozenset({"parameter_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
@@ -119,7 +119,7 @@ class LiveBridgeClient(_LiveTransport):
         )
 @dataclass(slots=True)
 class LiveCaptureClient(_LiveTransport):
-    """Opt-in audio-capture control; it does not install devices or control transport."""
+    """Opt-in bounded capture control for probe setup and playback."""
     def capture(
         self,
         command: str,
@@ -144,6 +144,56 @@ class LiveCaptureClient(_LiveTransport):
         if tap_port is not None:
             params["port"] = int(tap_port)
         return self._request("agent_audio_tap", params)
+    def setup_probe(
+        self,
+        *,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if verify_capability:
+            self._require_method("capture", "capture_probe_setup")
+        params: dict[str, Any] = {"placement": "master"}
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("capture_probe_setup", params)
+
+    def refresh_probe(
+        self,
+        *,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if verify_capability:
+            self._require_method("capture", "capture_probe_refresh")
+        params: dict[str, Any] = {}
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("capture_probe_refresh", params)
+
+
+    def transport(
+        self,
+        action: str = "status",
+        *,
+        time: float | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if action not in {"status", "seek", "play", "stop"}:
+            raise LiveBridgeError("capture transport action must be status, seek, play, or stop")
+        if action == "seek" and time is None:
+            raise LiveBridgeError("seek requires time")
+        if time is not None and float(time) < 0:
+            raise LiveBridgeError("time must be >= 0")
+        if verify_capability:
+            self._require_method("capture", "capture_transport")
+        params: dict[str, Any] = {"action": action}
+        if time is not None:
+            params["time"] = float(time)
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("capture_transport", params)
+
 @dataclass(slots=True)
 class LivePilotWriteClient(_LiveTransport):
     """Narrow pilot mutations only; currently exact track-volume writes."""

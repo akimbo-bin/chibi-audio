@@ -34,7 +34,7 @@ MODEL_READ_METHODS = (
     "browser_capabilities", "browser_roots", "browser_search",
 )
 MODEL_BOUNDED_WRITE_METHODS = ("parameter_set",)
-MODEL_CAPTURE_METHODS = ("agent_audio_tap",)
+MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport")
 MODEL_EXPOSED_METHODS = MODEL_READ_METHODS + MODEL_BOUNDED_WRITE_METHODS + MODEL_CAPTURE_METHODS
 AGENT_AUDIO_TAP_HOST = "127.0.0.1"
 AGENT_AUDIO_TAP_PORT = 17654
@@ -465,6 +465,54 @@ class AbletonLiveMCP(ControlSurface):
                 sock.close()
         return {"sent": sent, "command": command, "path": path, "bytes": payload_size, "command_file": command_file, "command_id": command_id}
 
+    def _rpc_capture_probe_setup(self, params):
+        if params.get("placement") not in (None, "master"):
+            raise ValueError("capture_probe_setup only supports placement=master")
+        forbidden = ("target_track", "solo_track", "exclusive_solo", "remove_existing", "stop", "reset_time")
+        supplied = [name for name in forbidden if params.get(name) not in (None, False)]
+        if supplied:
+            raise ValueError("capture_probe_setup does not accept: %s" % ", ".join(supplied))
+        song = self.song()
+        target_track = song.master_track
+        before = [getattr(device, "name", "") for device in getattr(target_track, "devices", [])]
+        loaded = False
+        if not self._track_has_device(target_track, "AgentAudioTap"):
+            item = self._find_browser_item_named("AgentAudioTap")
+            if item is None:
+                raise KeyError("AgentAudioTap is not installed/indexed in the Live browser")
+            song.view.selected_track = target_track
+            Live.Application.get_application().browser.load_item(item)
+            loaded = True
+        after = [getattr(device, "name", "") for device in getattr(target_track, "devices", [])]
+        count = len([name for name in after if name == "AgentAudioTap"])
+        if count != 1:
+            raise RuntimeError("Expected exactly one AgentAudioTap on Master after setup; found %s" % count)
+        return {
+            "target_track": getattr(target_track, "name", ""),
+            "loaded": loaded,
+            "before_devices": before,
+            "devices": after,
+            "probe_count": count,
+        }
+
+    def _rpc_capture_probe_refresh(self, params):
+        song = self.song()
+        track = song.master_track
+        devices = list(getattr(track, "devices", []))
+        matches = [i for i, device in enumerate(devices) if getattr(device, "name", "") == "AgentAudioTap"]
+        if len(matches) != 1:
+            raise RuntimeError("Expected exactly one AgentAudioTap on Master before refresh; found %s" % len(matches))
+        index = matches[0]
+        if index != len(devices) - 1:
+            raise RuntimeError("Refusing refresh: AgentAudioTap is not the final Master device")
+        if not hasattr(track, "delete_device"):
+            raise RuntimeError("Master track does not expose delete_device")
+        track.delete_device(index)
+        result = self._rpc_capture_probe_setup({"placement": "master"})
+        result["refreshed"] = True
+        return result
+
+
     def _rpc_agent_audio_tap_setup(self, params):
         song = self.song()
         placement = params.get("placement") or "master"
@@ -836,6 +884,22 @@ class AbletonLiveMCP(ControlSurface):
     def _agent_m4l_recovery_file(self, command_file):
         return "%s.recovery.json" % command_file
 
+    def _rpc_capture_transport(self, params):
+        action = params.get("action") or "status"
+        if action not in ("status", "seek", "play", "stop"):
+            raise ValueError("capture_transport action must be status, seek, play, or stop")
+        time_value = params.get("time")
+        if action == "seek" and time_value is None:
+            raise ValueError("seek requires time")
+        if time_value is not None and float(time_value) < 0:
+            raise ValueError("time must be >= 0")
+        forwarded = {"action": "status" if action == "seek" else action}
+        if time_value is not None:
+            forwarded["time"] = float(time_value)
+        result = self._rpc_transport(forwarded)
+        result["requested_action"] = action
+        return result
+
     def _rpc_transport(self, params):
         song = self.song()
         if params.get("time") is not None:
@@ -865,8 +929,12 @@ class AbletonLiveMCP(ControlSurface):
         return payload
 
     def _seek_song(self, song, time_value):
-        current = float(getattr(song, "current_song_time", 0.0))
-        song.jump_by(time_value - current)
+        time_value = float(time_value)
+        song.current_song_time = time_value
+        try:
+            song.start_time = time_value
+        except Exception:
+            pass
 
     def _start_transport(self, song):
         song.start_playing()

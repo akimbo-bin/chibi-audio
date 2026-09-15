@@ -124,6 +124,7 @@ function openPath(path) {
         return;
     }
     lastPath = path;
+    outlet(0, "samptype", "float32");
     outlet(0, "open", path, "wave");
     report("open");
 }

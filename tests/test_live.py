@@ -25,7 +25,7 @@ class FakeCaptureClient(LiveCaptureClient):
     def status(self):
         return {
             "capabilities": {
-                "capture": ["agent_audio_tap"],
+                "capture": list(CAPTURE_METHODS),
                 "bounded_write": ["parameter_set"],
                 "read": list(READ_ONLY_METHODS),
             }
@@ -71,3 +71,30 @@ def test_pilot_write_targets_only_exact_track_volume_path():
     assert params["ref"]["path"] == "song tracks 60 mixer_device volume"
     assert params["expected_track_name"] == "61-something"
     assert params["expected_current_value"] == pytest.approx(0.85)
+
+
+def test_capture_surface_includes_probe_setup_and_transport():
+    assert "capture_probe_setup" in CAPTURE_METHODS
+    assert "capture_transport" in CAPTURE_METHODS
+
+
+def test_capture_probe_setup_is_master_only():
+    client = FakeCaptureClient()
+    result = client.setup_probe(expected_set_signature="sig-1")
+    assert result["method"] == "capture_probe_setup"
+    params = client.calls[-1][1]
+    assert params["placement"] == "master"
+    assert params["expected_set_signature"] == "sig-1"
+
+def test_capture_transport_seek_and_guards():
+    client = FakeCaptureClient()
+    result = client.transport("seek", time=68.0, expected_set_signature="sig-2")
+    assert result["method"] == "capture_transport"
+    params = client.calls[-1][1]
+    assert params == {"action": "seek", "time": 68.0, "expected_set_signature": "sig-2"}
+    with pytest.raises(LiveBridgeError, match="seek requires time"):
+        client.transport("seek")
+    with pytest.raises(LiveBridgeError, match="must be status, seek, play, or stop"):
+        client.transport("continue")
+    with pytest.raises(LiveBridgeError, match="time must be >= 0"):
+        client.transport("status", time=-1)
