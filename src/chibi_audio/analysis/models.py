@@ -24,6 +24,7 @@ class AnalysisCapability(StrEnum):
     MIR_BEATS = "audio.mir.beats"
     MIR_TONAL = "audio.mir.tonal"
     MIR_KEY = "audio.mir.key"
+    MIR_TIMBRE = "audio.mir.timbre"
     MIR_STRUCTURE = "audio.mir.structure"
     MIR_PITCH = "audio.mir.pitch"
     MIR_TRANSCRIPTION = "audio.mir.transcription"
