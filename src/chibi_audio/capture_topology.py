@@ -152,7 +152,7 @@ def _observed_tap_id(read_client: LiveBridgeClient, device_id: int) -> tuple[int
         return -1, True
     try:
         return int(str(tap_id.get("display", "")).strip()), False
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise CaptureError(f"ChibiTap device {device_id} Tap ID is unreadable during restore") from exc
 
 
@@ -234,12 +234,15 @@ def prepare_capture_topology(
                 raise CaptureError(f"prepared Tap ID {prepared_tap.tap_id} disappeared before capture")
             if (
                 resolved_tap.device_id != prepared_tap.device_id
-                or resolved_tap.device_index != prepared_tap.device_index
                 or resolved_tap.signal_point != prepared_tap.signal_point
             ):
                 raise CaptureError(
                     f"prepared ChibiTap identity changed before capture for Tap ID {prepared_tap.tap_id}"
                 )
+            # Later insertions at earlier signal points can legitimately shift a
+            # previously prepared device's numeric index. Reconcile the final index
+            # only after the complete topology has been verified by exact identity.
+            prepared_tap.device_index = resolved_tap.device_index
 
         return CaptureTopologyLease(
             initial_set_signature=initial_signature,
