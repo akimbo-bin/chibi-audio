@@ -87,6 +87,66 @@ Build a ranked contribution report around the loudest master events:
 - predicted small upstream interventions.
 Test distributed peak control (source/track/bus) against final-limiter-only loudness.
 **Acceptance:** at least one A/B demonstrates either more clean loudness at comparable character or the same loudness with lower distortion/less pumping.
+## R5.25 - Sidechain intelligence, routing and verification - TARGET
+Tracked by [#5](https://github.com/akimbo-bin/chibi-audio/issues/5).
+
+Treat sidechaining as a **core mix primitive**, not merely a plugin insertion task. Chibi must understand and verify explicit source -> target relationships such as kick -> bass, snare -> music bus, or vocal -> competing instruments.
+
+Represent each relationship with:
+- trigger source and routing point;
+- target track/group/bus;
+- processing method (full-band duck, volume shape, spectral carve/dynamic EQ, multiband, creative pump);
+- relevant frequency range;
+- depth;
+- lookahead/attack;
+- hold/release or explicit gain-reduction curve;
+- intended purpose such as low-end headroom, transient clearance, intelligibility or creative pumping.
+
+### Sidechain audit
+Given a Live Set, identify:
+- every current external-sidechain consumer and its source;
+- missing or stale routes;
+- devices that are configured but not actually triggering;
+- duplicated/contradictory ducking stages;
+- inappropriate source/target routing;
+- stacked gain reduction that over-ducks the same event.
+
+### Verified ducking
+Do not trust device state or a gain-reduction meter alone. Use aligned trigger + target pre-processing + target post-processing captures to measure, per event:
+- trigger time and missed/false triggers;
+- gain-reduction onset relative to trigger;
+- pre-duck/lookahead time;
+- maximum and integrated depth;
+- hold/recovery time and recovery curve;
+- frequency-dependent reduction for selective ducking;
+- residual time-frequency overlap after processing;
+- recovered bus/master headroom;
+- target transient preservation outside the collision window;
+- click/discontinuity or modulation artifacts;
+- cumulative reduction when multiple stages stack.
+
+### Estimate the smallest sufficient intervention
+There is no universal sidechain depth. Optimize according to the purpose:
+- **kick -> bass:** clear the kick/sub collision and limiter stress while preserving bass continuity;
+- **snare -> music:** create brief transient/body space, often with shorter and more frequency-selective ducking;
+- **vocal -> music:** prefer spectral/dynamic space when full-band pumping would be distracting.
+
+Use bounded parameter sweeps and A/B evidence to find the minimum depth/timing that produces useful separation. Prefer source-shape-independent triggers (MIDI or derived transient events) when stable timing matters more than following the source sample's whole envelope.
+
+### Intent-level commands
+Support operations such as:
+- `sidechain kick to all relevant music buses`;
+- `add snare clearance`;
+- `make room for the vocal globally`.
+
+For these commands, inspect the project graph, choose appropriate targets, exclude the trigger's own/unsafe routes, choose the processing class per target, set per-target starting values rather than cloning one amount everywhere, verify the actual rendered ducking, and return an auditable relationship map.
+
+### Adaptive relationships
+Allow section-aware, note-aware and velocity-aware sidechain behavior where justified. Examples include deeper kick/bass ducking only when fundamentals collide, lighter ducking when they do not, or different envelopes in sparse verses versus dense drops.
+
+Integrate the sidechain evidence with R5 and R5.75 so sidechain changes can be tested as upstream remedies for loudness bottlenecks rather than defaulting to additional master limiting.
+
+**Acceptance:** on KISSKISSKISS, Chibi audits the existing kick/bass sidechain path, measures its real reduction and timing, applies one bounded verified sidechain experiment, demonstrates the resulting overlap/headroom change with a level-matched A/B, proves rollback, and executes at least one intent-level command across more than one appropriate target without manual per-plugin routing.
 ## R5.5 - Perceptual translation and audibility MVP
 Answer questions that ordinary spectrum/loudness meters cannot answer reliably, such as:
 - **Which exact sources make this mix feel harsh, crispy or fatiguing?**
@@ -178,7 +238,7 @@ Compare the curve and knee with user references by equivalent musical section wh
 ### Iteration wave
 Each optimization wave should:
 1. observe the current best Set/render and fresh evidence;
-2. rank a small number of causal hypotheses from R5/R5.5;
+2. rank a small number of causal hypotheses from R5/R5.25/R5.5;
 3. choose one coherent bounded intervention with expected benefit and risk;
 4. checkpoint the exact current state;
 5. apply the mutation through the typed Live path and read it back;
@@ -187,7 +247,7 @@ Each optimization wave should:
 8. keep the candidate only if it improves the goal without violating guardrails; otherwise roll back exactly;
 9. update the evidence and choose the next wave rather than blindly repeating the same strategy.
 
-Candidate interventions may include source trims, envelope changes, dynamic low-band space, local transient clipping, track/bus compression, clipper/limiter changes, targeted harshness control or other already-proven bounded operations. Prefer upstream/distributed peak control when it achieves the same loudness with lower full-mix damage.
+Candidate interventions may include source trims, envelope changes, sidechain depth/timing/routing changes, dynamic low-band space, local transient clipping, track/bus compression, clipper/limiter changes, targeted harshness control or other already-proven bounded operations. Prefer upstream/distributed peak control when it achieves the same loudness with lower full-mix damage.
 
 ### Stop conditions
 The loop must stop truthfully when any of these becomes true:
@@ -223,7 +283,7 @@ No automatic file moves or deduplication until project-reference safety is solve
 Expand the proven experiment loop to:
 - EQ and dynamic-EQ hypotheses;
 - compression/clipper experiments;
-- generalized sidechain relationships (kick, snare, vocal, FX, etc.);
+- generalized sidechain relationships building on the verified R5.25 source-target graph;
 - per-section automation;
 - optional offline plugin-chain experiments;
 - optional audio-rate telemetry via a small Max for Live tap;
