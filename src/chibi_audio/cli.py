@@ -9,6 +9,7 @@ from .audio import analyze_audio
 from .harshness import analyze_harshness
 from .capture import CaptureError
 from .capture_finalize import TapCaptureInput, finalize_aligned_captures
+from .capture_session import CaptureSessionTap, parse_session_tap, run_capture_session
 from .library import places_dict, read_user_places
 from .live import LiveBridgeClient
 from .plugins import catalog_dict, discover_plugins
@@ -23,6 +24,13 @@ def _tap_capture_arg(value: str) -> TapCaptureInput:
         raise argparse.ArgumentTypeError(
             "tap must use TAP_ID:LABEL:PATH, for example 1:Main:C:/captures/main.wav"
         ) from exc
+
+
+def _session_tap_arg(value: str) -> CaptureSessionTap:
+    try:
+        return parse_session_tap(value)
+    except CaptureError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def main() -> None:
@@ -72,6 +80,29 @@ def main() -> None:
     finalize.add_argument("--transport-stop-beat", type=float)
     finalize.add_argument("--no-analysis", action="store_true")
 
+    capture_session = sub.add_parser(
+        "capture-session",
+        help="Run one aligned ChibiTap session and finalize it to an exact beat range",
+    )
+    capture_session.add_argument("--experiment-id", required=True)
+    capture_session.add_argument(
+        "--tap",
+        action="append",
+        type=_session_tap_arg,
+        required=True,
+        help="Repeat TAP_ID:LABEL:TARGET; TARGET is master/Main or an exact Live track name",
+    )
+    capture_session.add_argument("--output-dir", required=True)
+    capture_session.add_argument("--start-beat", type=float, required=True)
+    capture_session.add_argument("--end-beat", type=float, required=True)
+    capture_session.add_argument("--host", default="127.0.0.1")
+    capture_session.add_argument("--port", type=int, default=18765)
+    capture_session.add_argument("--capture-root")
+    capture_session.add_argument("--poll-interval", type=float, default=0.05)
+    capture_session.add_argument("--settle-seconds", type=float, default=0.6)
+    capture_session.add_argument("--timeout-margin", type=float, default=8.0)
+    capture_session.add_argument("--no-analysis", action="store_true")
+
     args = parser.parse_args()
     if args.command == "inspect-set":
         print(dumps_report(inspect_set(args.path)))
@@ -102,6 +133,24 @@ def main() -> None:
             transport_start_beat=args.transport_start_beat,
             transport_stop_beat=args.transport_stop_beat,
             include_analysis=not args.no_analysis,
+        )
+        print(manifest_path.read_text(encoding="utf-8"), end="")
+
+
+    elif args.command == "capture-session":
+        manifest_path = run_capture_session(
+            experiment_id=args.experiment_id,
+            taps=args.tap,
+            output_dir=args.output_dir,
+            start_beat=args.start_beat,
+            end_beat=args.end_beat,
+            host=args.host,
+            port=args.port,
+            capture_root=args.capture_root,
+            include_analysis=not args.no_analysis,
+            poll_interval=args.poll_interval,
+            settle_seconds=args.settle_seconds,
+            timeout_margin=args.timeout_margin,
         )
         print(manifest_path.read_text(encoding="utf-8"), end="")
 

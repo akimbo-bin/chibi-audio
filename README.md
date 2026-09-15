@@ -39,5 +39,5 @@ Already proven on the real pilot project:
 - ChibiTap VST3 core and real-wrapper host tests proving transparent pass-through and non-zero float32 capture;
 - real Ableton ChibiTap capture through typed control with no Export dialog or CUA;
 - ChibiTap 0.2.0 Main/BASS/DRUMS multi-tap proof with Tap IDs 1/2/3, host-play gating, and identical sample counts across all three artifacts.
-Next acceptance boundary: **make the requested beat/sample end boundary exact, then wrap aligned Main/BASS/DRUMS/source capture + fingerprints + analysis into one experiment operation.**
+Current acceptance boundary is complete: **`chibi-audio capture-session` now coordinates aligned Main/BASS/DRUMS capture, exact requested-range finalization, fingerprints, analysis, and Tap-ID-to-Live-track provenance in one experiment manifest.** Next: extend the same evidence plane to bounded source/pre-post taps and make it the normal input to A/B, loudness-stress, sidechain, and translation workflows.
 See [VISION.md](VISION.md), [docs/architecture.md](docs/architecture.md), [docs/roadmap.md](docs/roadmap.md), [docs/pilot-kisskisskiss.md](docs/pilot-kisskisskiss.md), [docs/connection-contract.md](docs/connection-contract.md), [docs/capture-probe.md](docs/capture-probe.md), and [AGENTS.md](AGENTS.md).

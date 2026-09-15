@@ -53,10 +53,15 @@ Range-finality contract:
 - final artifacts are cut to the requested sample interval, with requested beats/tempo, actual transport timing, raw/final hashes, sample counts and optional analysis preserved in the manifest;
 - the current pilot uses a `constant_bpm` timing model. Tempo-automated ranges need a tempo-map/sample-boundary model before they may claim the same exact beat semantics.
 
+Coordinator milestone complete:
+- `chibi-audio capture-session` now resolves Tap IDs to exact Live track/device identities, arms all requested taps behind the Set-signature fence, runs one typed transport pass, verifies stable aligned raw artifacts, and calls the exact-range finalizer automatically;
+- the resulting manifest carries the Tap ID -> Live track/device mapping, Set signature, song identity/path, requested and actual transport timing, raw/final hashes, exact sample counts and optional analysis;
+- a live CLI proof over beats 64-68 @ 135 BPM produced three aligned raw files of 232,960 samples and three exact final artifacts of 85,333 samples.
+
 Next:
-- have the capture coordinator call the exact-range finalizer automatically at the end of every multi-tap capture session;
-- carry the Tap ID -> Live track mapping and experiment/change provenance into the same manifest;
-- use Main/BASS/DRUMS/source taps as the normal evidence plane for A/B, loudness-stress and sidechain experiments.
+- use Main/BASS/DRUMS/source taps as the normal evidence plane for A/B, loudness-stress and sidechain experiments;
+- add bounded source/pre-FX/post-FX signal-point placement where Live exposes the required topology cleanly;
+- carry accepted/rejected change provenance into higher-level experiment manifests so optimization waves can compare variants without ad-hoc exports.
 
 **Acceptance: PROVEN on KISSKISSKISS.** A normal A/B capture requires no CUA or Export Audio/Video dialog, produces fingerprinted float32 artifacts linked to one experiment manifest, and multiple taps produce the same exact requested musical sample range with deterministic alignment.
 ## R1.75 - Typed Ableton control and diagnostic audition plane - ACTIVE
