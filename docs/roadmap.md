@@ -87,6 +87,55 @@ Build a ranked contribution report around the loudest master events:
 - predicted small upstream interventions.
 Test distributed peak control (source/track/bus) against final-limiter-only loudness.
 **Acceptance:** at least one A/B demonstrates either more clean loudness at comparable character or the same loudness with lower distortion/less pumping.
+## R5.5 - Perceptual translation and audibility MVP
+Answer questions that ordinary spectrum/loudness meters cannot answer reliably, such as:
+- **Which exact sources make this mix feel harsh, crispy or fatiguing?**
+- **Will the bass remain perceptually present when sub-bass reproduction disappears?**
+- **Does the vocal/hat/bass relationship survive phone-like, mono and low-volume playback?**
+- **Is an unpleasant quality coming from the source itself or being created downstream by track, bus or master processing?**
+
+Build a synthetic-hearing evidence stack from inspectable sensors rather than treating any one metric or model as musical truth.
+
+### Psychoacoustic evidence
+Add perceptually motivated measurements where they prove useful:
+- critical-band / Bark / ERB-domain energy and specific loudness;
+- sharpness, roughness, tonality and related perceptual descriptors;
+- masking/audibility estimates between competing sources;
+- distinguish brightness, sharpness, sibilance, transient hardness, resonant whistles and distortion/fizz instead of collapsing them into one `too much high end` diagnosis.
+
+### Harmonic survivability and bass presence
+For tonal low-frequency sources, estimate:
+- fundamental and harmonic trajectories;
+- which harmonics remain perceptible when low bass is removed or masked;
+- whether missing translation is caused by insufficient harmonic audibility versus competing midrange material;
+- whether a proposed saturation/EQ/envelope intervention improves audibility without merely raising sub energy.
+
+### Playback translation lab
+Evaluate bounded sections through explicit playback profiles such as:
+- full-range reference monitoring;
+- phone-like bandwidth;
+- laptop/small-speaker bandwidth;
+- mono;
+- low and very-low listening level;
+- optional user-calibrated devices such as a specific car or speaker.
+
+Profiles are diagnostic approximations, not claims of exact hardware emulation. Compare perceptual/source relationships after translation, not only the filtered master waveform.
+
+### Causal and event-level forensics
+Use aligned typed captures to compare useful signal points when available:
+- source / track pre-FX;
+- track post-FX;
+- group pre/post processing;
+- premaster;
+- mastered output.
+
+Analyze musical events, not only long averages. Rank individual hats, sibilants, kicks, bass notes or other events by perceptual salience, overlap and contribution to downstream stress. Small controlled bypass/parameter perturbations may be used to attribute a problem to an exact processor when authorized.
+
+### Semantic evidence and calibration
+Audio embeddings or audio-language models may be used as weak semantic sensors for concepts such as `bright`, `metallic`, `punchy`, `muffled` or `harsh`, but never as the sole mastering judge.
+Record predictions against later real listening checks (phone, car, headphones, etc.) so each sensor can be calibrated. Retire or down-weight sensors that do not predict useful outcomes.
+
+**Acceptance:** on KISSKISSKISS, Chibi can (1) identify which source(s) dominate a known harsh/crispy passage and whether the problem is source or downstream processing, (2) explain which bass harmonics remain audible under a phone-like profile and what masks them, and (3) make at least one playback-translation prediction that is checked against a real listening test. The output must remain an evidence-backed hypothesis for the artist, not an autonomous declaration that a mix `sounds good`.
 ## R6 - Plugin intelligence only as demanded by the pilot
 Normalize duplicate plugin formats into logical products and improve intent categories. Add manuals/parameter semantics only for plugins we actually need to operate.
 **Acceptance:** requests such as "what transparent clippers do I own?" or "which installed tool can dynamically create space here?" return grounded candidates from the machine inventory.
@@ -100,7 +149,8 @@ Expand the proven experiment loop to:
 - generalized sidechain relationships (kick, snare, vocal, FX, etc.);
 - per-section automation;
 - optional offline plugin-chain experiments;
-- optional audio-rate telemetry via a small Max for Live tap.
+- optional audio-rate telemetry via a small Max for Live tap;
+- perceptual/audibility/translation evidence proven in R5.5.
 ## R9 - Chibi / Ultron integration
 Expose proven capabilities to Chibi Core as a specialist production executor. Preserve Core as the only workflow authority and preserve artist approval for subjective material changes by default.
 ## Scope guard
