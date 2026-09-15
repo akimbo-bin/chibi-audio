@@ -35,9 +35,10 @@ Only after read reconciliation is proven do we add bounded writes such as rename
 ## 3. UI accessibility is bootstrap observability, not steady-state authority
 Windows accessibility can currently expose a surprising amount of Live state and is useful for prototyping/verification. It is not the desired primary mutation path because UI layout and focus are less stable than typed Live objects.
 Use UI automation only for operations that genuinely lack a structured seam, and make that fallback explicit.
-## 4. Optional Max for Live audio tap
-Use a small Max for Live device only if we need audio-rate PCM or meter telemetry unavailable through the Remote Script.
-The Max device should stream/measure; it should not own project state, MCP orchestration, planning or durable history.
+## 4. Max for Live capture probe
+Use a small Max for Live device only for audio-rate capture/telemetry unavailable through the Remote Script. Chibi Audio now packages an MIT-licensed AgentAudioTap-derived probe for transparent pass-through capture.
+The probe records evidence; it does not own project state, MCP orchestration, planning or durable history. Capture control is a separate capability lane (`open/start/stop/status`) and does not imply device installation, soloing, seeking or transport control.
+See [connection-contract.md](connection-contract.md) and [capture-probe.md](capture-probe.md).
 ## 5. Plugin knowledge base
 Build a machine-local logical-product catalog from the user's actual plugin installation and Live-visible devices.
 Useful fields:

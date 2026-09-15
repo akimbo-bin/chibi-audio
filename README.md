@@ -1,4 +1,4 @@
-﻿# Chibi Audio
+# Chibi Audio
 AI-assisted music production for Ableton Live without generative-music slop.
 Chibi Audio helps a ChatGPT/Chibi worker understand a real Ableton Live Set, the user's installed plugins and sample library, make bounded and reversible production changes, and prove those changes through measurable and listenable A/B experiments.
 ## Prime directive
@@ -21,7 +21,7 @@ A user-supplied reference track can be analyzed locally as another evidence sour
 - Reconciled saved-state + live-state project model.
 - Machine-local plugin and sample indexes.
 - Section-aware audio analysis and a reversible A/B experiment engine.
-- Optional Max for Live audio tap only where audio-rate PCM/telemetry is genuinely required.
+- Packaged Max for Live capture probe for deterministic audio evidence without repetitive Export-dialog automation.
 - Eventual Chibi Core / Ultron integration, with Chibi Core remaining the workflow authority.
 Existing Ableton MCP/OSC projects are treated as upstream components and references, not as a second authority. See [docs/ecosystem-research.md](docs/ecosystem-research.md).
 ## Status
@@ -31,6 +31,10 @@ Already proven on the real pilot project:
 - installed plugin inventory across VST2/VST3/CLAP roots;
 - Ableton Places/sample-library root discovery;
 - a separate `KISSKISSKISS Chibi Lab` disk copy for experiments;
-- an initial upstream research checkout for bridge and analysis candidates.
-Next acceptance boundary: **inspect the current Live Set through a structured read bridge, reconcile it with the saved snapshot, and then perform the first reversible edit on the lab Set.**
-See [VISION.md](VISION.md), [docs/architecture.md](docs/architecture.md), [docs/roadmap.md](docs/roadmap.md), [docs/pilot-kisskisskiss.md](docs/pilot-kisskisskiss.md), and [AGENTS.md](AGENTS.md).
+- an initial upstream research checkout for bridge and analysis candidates;
+- structured Live bridge reads proven against the real Set;
+- saved/live track reconciliation proven;
+- one bounded source-level write + same-session A/B proof;
+- packaged bridge + AgentAudioTap capture probe with a reproducible installer.
+Next acceptance boundary: **activate the packaged capture path when Ableton is available, replace repeated GUI export work with typed capture, and then resume reversible mix experiments.**
+See [VISION.md](VISION.md), [docs/architecture.md](docs/architecture.md), [docs/roadmap.md](docs/roadmap.md), [docs/pilot-kisskisskiss.md](docs/pilot-kisskisskiss.md), [docs/connection-contract.md](docs/connection-contract.md), [docs/capture-probe.md](docs/capture-probe.md), and [AGENTS.md](AGENTS.md).

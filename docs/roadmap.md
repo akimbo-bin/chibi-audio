@@ -1,6 +1,6 @@
-﻿# Roadmap
+# Roadmap
 The roadmap is deliberately pilot-first. New platform work is allowed only when the current acceptance boundary needs it.
-## R0 - Establish reality and a safe playground - DONE / final reconciliation pending
+## R0 - Establish reality and a safe playground - DONE
 Completed:
 - read real `.als` files without mutation;
 - map the real KISSKISSKISS track/group/device structure;
@@ -8,11 +8,12 @@ Completed:
 - discover Ableton Places/sample-library roots;
 - survey and clone a focused upstream component shortlist;
 - create a separate `KISSKISSKISS Chibi Lab` project folder from the last saved project state.
-Remaining before writes:
-- capture/reconcile the currently open Set's unsaved state into the lab lineage;
-- record a clean baseline snapshot and baseline render.
+Additional proof completed:
+- current unsaved state preserved into the Chibi Lab lineage;
+- live/saved track order reconciled 87/87 before bounded writes;
+- original project remained untouched.
 **Acceptance:** the original Set is untouched and we can identify exactly which project lineage is safe to edit.
-## R1 - Read the currently open Set deeply - ACTIVE
+## R1 - Read the currently open Set deeply - PILOT READ PATH PROVEN
 Build the minimum read-only Live bridge needed for the pilot.
 Scope:
 - health/version handshake;
@@ -24,6 +25,21 @@ Scope:
 - reconcile Live state against the saved `.als` snapshot.
 Do not build broad write APIs yet. Do not expose arbitrary Python.
 **Acceptance:** a machine-readable live snapshot explains the open pilot Set and identifies saved-vs-unsaved differences without GUI scraping as the primary source.
+## R1.5 - Connection hardening and typed capture - ACTIVE
+Completed:
+- package the Remote Script bridge in this repository;
+- add an explicit capability handshake with separate read / bounded-write / capture lanes;
+- declare no silent GUI fallback and no arbitrary-code capability;
+- vendor the MIT AgentAudioTap Max for Live device and source;
+- add capture plan/manifest/stable-file hashing helpers;
+- add a reproducible installer and prove it against a fake User Library;
+- run unit tests without Live running.
+Remaining when Ableton is free:
+- install/activate the packaged bridge/probe version intentionally;
+- prove one typed capture from a known signal point;
+- build a range/transport coordinator so capture of a known bar range is one typed operation;
+- expand to aligned multi-probe capture only after the single-probe flow is stable.
+**Acceptance:** a normal A/B capture requires no CUA or Export Audio/Video dialog and produces a fingerprinted artifact linked to an experiment manifest.
 ## R2 - First reversible organization edit
 On the lab Set only:
 - checkpoint current state;
@@ -33,7 +49,8 @@ On the lab Set only:
 - prove rollback;
 - save a lab variant, never overwrite the original project.
 **Acceptance:** one coherent organization batch is applied and reversed/reapplied reliably with an exact audit trail.
-## R3 - First meaningful sonic A/B
+## R3 - First meaningful sonic A/B - FIRST SOURCE-LEVEL PROOF COMPLETE / GENERAL LOOP PENDING
+Pilot proof: the D61 source-level -1.0 dB experiment was verified against a same-session zero-change control. It reduced house/bridge density and increased crest without materially changing later sections. The general A/B loop remains pending the typed capture path.
 Pick exactly one evidence-backed mix problem. Candidate classes include:
 - a harsh/resonant individual drum layer;
 - a kick/bass collision that consumes headroom;
@@ -49,7 +66,8 @@ For the selected problem:
 6. measure section-level deltas;
 7. let the artist choose keep/refine/reject.
 **Acceptance:** the user can hear a meaningful A/B, the change is exactly reproducible/reversible, and measurements explain what changed without pretending to decide taste.
-## R4 - Reference-track comparison
+## R4 - Reference-track comparison - INITIAL PILOT PROOF COMPLETE / FEATURE GENERALIZATION PENDING
+Pilot references already analyzed: Petite Biscuit - All Over, Skrillex - Rumble, and Push. Existing separated All Over stems were also used as an analytical fixture.
 Use one or two user-provided references as local evidence.
 Compare by equivalent musical section where possible:
 - loudness/crest factor;
