@@ -53,18 +53,55 @@ Machine-specific paths and private inventory dumps stay local by default.
 ## 6. Sample library index
 Start read-only. Index metadata without reorganizing files. Later derive duration, sample rate, channels, BPM/key estimates, transient/spectral features and semantic embeddings where useful.
 Moving, renaming or deduplicating samples is a separate opt-in capability because existing Live Sets may reference exact paths.
-## 7. Audio evidence layer
-Analyze real renders by musical section, not only whole-song averages.
-Near-term evidence:
+## 7. Audio evidence and synthetic hearing layer
+Analyze real renders and typed captures by musical section and event, not only whole-song averages. The goal is not to make one metric decide whether audio `sounds good`; it is to give the reasoning worker enough independent senses to form better, testable hypotheses.
+
+### Deterministic signal evidence
+Near-term core measurements include:
 - LUFS and true/sample peak;
 - RMS and crest factor;
 - band energy/spectral balance;
-- transient density;
+- transient density and envelope behavior;
 - stereo width/correlation and Mid/Side balance;
 - low-end overlap;
 - level-matched A/B deltas.
 A user-supplied reference can be analyzed through the same measurements.
-Metrics are evidence, not musical truth.
+
+### Psychoacoustic evidence
+Add perceptually motivated measurements where they improve diagnosis:
+- critical-band / Bark / ERB-domain energy;
+- specific loudness and loudness by perceptual band;
+- sharpness, roughness, tonality and related descriptors;
+- masking and source-audibility estimates;
+- perceptual distinctions between brightness, sharpness, sibilance, transient hardness, resonant whistles and distortion/fizz.
+These measurements remain evidence, not musical truth.
+
+### Harmonic survivability and source audibility
+For tonal sources such as bass, estimate fundamental/harmonic trajectories and which partials remain perceptible when low-frequency reproduction disappears or competing sources mask them. This supports questions such as `will the bass still read on a phone?` without reducing the answer to total low-frequency energy.
+
+### Playback translation profiles
+Support explicit diagnostic playback profiles such as full-range reference monitoring, phone-like bandwidth, laptop/small speaker, mono, low-volume listening and optional user-calibrated devices such as a specific car or speaker.
+Profiles are approximations. Their purpose is to test whether important source relationships, harmonics and perceptual cues survive translation, not to claim exact hardware emulation.
+
+### Aligned signal-point forensics
+When capture support allows it, compare bounded aligned windows across useful signal points:
+- source / track pre-FX;
+- track post-FX;
+- group pre/post processing;
+- premaster;
+- mastered output.
+This lets Chibi distinguish a harsh source from harshness introduced by saturation, compression, limiting or other downstream processing. Small controlled bypass or parameter perturbations may be used to build causal sensitivity maps when authorized.
+
+### Event-level analysis
+Average track statistics can hide isolated problems. Detect and rank musically meaningful events such as hats, sibilants, kicks, bass notes or limiter-driving transients by salience, overlap, sharpness/roughness, masking and downstream stress. Report the exact events/sections responsible whenever possible.
+
+### Semantic audio evidence
+Audio embeddings or audio-language models may be used as weak semantic sensors for descriptors such as `bright`, `metallic`, `punchy`, `muffled` or `harsh`. They must not be treated as authoritative mastering judges and should be paired with inspectable signal evidence.
+
+### Sensor calibration
+When the system predicts a translation or perceptual outcome and the artist later checks it on real playback (phone, car, headphones, etc.), record prediction versus outcome. Use those observations to calibrate, down-weight or retire sensors that do not predict useful outcomes. This does not require model fine-tuning; calibration and retrieval of relevant prior evidence are sufficient first steps.
+
+The reasoning model integrates these sensors; it is not itself assumed to possess mastering-grade hearing.
 ## 8. Experiment engine
 A material subjective change is an experiment, not an opaque edit.
 Each experiment records:
@@ -75,7 +112,9 @@ Each experiment records:
 - observed post-write values;
 - A/B render identifiers;
 - level-matched metrics;
-- user verdict: keep, refine, reject, rollback.
+- perceptual/translation predictions when relevant;
+- user verdict: keep, refine, reject, rollback;
+- later real-playback validation where available.
 The experiment engine is the basis for later automated EQ, dynamics, sidechain and mastering exploration.
 ## 9. Mutation/effect certainty
 Every write batch follows:
