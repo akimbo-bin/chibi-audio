@@ -54,7 +54,13 @@ def make_server(tmp_path):
 def test_locator_tools_are_read_only_and_present(tmp_path):
     server, _locator = make_server(tmp_path)
     tools = tool_map(server)
-    for name in ("get_locators", "get_sections", "resolve_section", "get_song_position"):
+    for name in (
+        "get_locators",
+        "get_sections",
+        "resolve_section",
+        "get_song_position",
+        "plan_section_capture",
+    ):
         assert name in tools
         assert tools[name].annotations.read_only_hint is True
         assert tools[name].annotations.destructive_hint is False
@@ -78,3 +84,23 @@ def test_song_position_reports_active_and_adjacent_sections(tmp_path):
     assert data["active_section"]["name"] == "Build"
     assert data["previous_section"]["name"] == "Intro"
     assert data["next_section"]["name"] == "Drop 1"
+
+
+def test_plan_section_capture_is_read_only_and_returns_capture_session_payload(tmp_path):
+    server, _locator = make_server(tmp_path)
+    result = asyncio.run(
+        server.call_tool(
+            "plan_section_capture",
+            {
+                "name": "Drop 1",
+                "tap_specs": ["1:Main:master", "2:BASS:BASS", "3:DRUMS:DRUMS"],
+            },
+        )
+    )
+    data = result.structured_content
+    assert data["effect_state"] == "NOT_STARTED"
+    assert data["section"]["name"] == "Drop 1"
+    assert data["capture_request"]["start_beat"] == 32.0
+    assert data["capture_request"]["end_beat"] == 48.0
+    assert data["capture_request"]["taps"][0]["target"] == "master"
+    assert data["ready_to_execute"] is True
