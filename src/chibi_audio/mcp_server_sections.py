@@ -5,6 +5,8 @@ from typing import Annotated, Any
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .analysis_bridge import AnalysisFabricBridge
+from .analysis_mcp import register_analysis_tools
 from .capture import _safe_id
 from .capture_session import parse_session_tap, run_capture_session
 from .facade import ChibiAudioFacade
@@ -31,15 +33,19 @@ def build_mcp_server(
     *,
     facade: ChibiAudioFacade | None = None,
     locator_client: LocatorBridgeClient | None = None,
+    analysis_bridge: AnalysisFabricBridge | None = None,
 ):
     server = build_base_mcp_server(settings, facade=facade)
     locator = locator_client or LocatorBridgeClient(host="127.0.0.1", port=settings.live_port)
+    analysis = analysis_bridge or AnalysisFabricBridge(settings.artifact_root)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=False,
     )
+    register_analysis_tools(server, analysis, read_annotations)
+
     write_annotations = ToolAnnotations(
         readOnlyHint=False,
         destructiveHint=True,
