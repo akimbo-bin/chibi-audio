@@ -1,4 +1,4 @@
-﻿# Live connection contract
+# Live connection contract
 This document defines the model-facing boundary between Chibi Audio and Ableton Live.
 ## Goals
 - Every worker gets the same typed capability surface.
@@ -28,24 +28,28 @@ Pilot writes must have exact identity and before-state preconditions. The first 
 - requested new value.
 A mismatch refuses the operation. Generic setters, arbitrary calls and arbitrary Python execution are not exposed.
 ### Capture
-The capture controller exposes only `agent_audio_tap` commands:
-- `open(path)`
-- `start`
-- `stop`
-- `status`
-The capture command path does not install devices, solo tracks, seek transport or manipulate the arrangement. Those are separate capabilities and must be designed/authorized independently.
+The primary capture surface is ChibiTap plus bounded transport:
+- `chibitap_capture(enabled, expected_current_value, expected_device_id, expected_set_signature)`;
+- `capture_transport(status|seek|play|stop)`.
+
+`chibitap_capture` is intentionally not a generic plugin-parameter setter. It refuses to act unless the final Main device is exactly `ChibiTap`, the device identity matches when supplied, the observed `Capture` value matches `expected_current_value`, and any supplied Set signature still matches.
+
+The legacy `agent_audio_tap` Max-for-Live command path (`open/start/stop/status`) remains advertised only as an experimental/fallback capture implementation.
+
+Capture authority does not imply arbitrary device insertion, soloing, routing edits, broad parameter writes, or GUI control. Those remain separate typed capabilities.
 ## Capture artifact lifecycle
-1. Create a `CapturePlan` with experiment/source identity and musical range.
-2. Write an atomic experiment manifest.
-3. Ensure a trusted AgentAudioTap is already present at the desired signal point.
-4. Send `open` with a unique output path.
-5. Start capture.
-6. Run/play the musical range through Live.
-7. Stop capture.
-8. Wait until the WAV becomes stable on disk.
-9. Fingerprint it with SHA-256.
-10. Analyze the immutable capture and attach results to the experiment.
-The planned next coordinator will make steps 4-8 a single typed operation after transport/range control is proven safe. Until then, the model must not substitute CUA for a missing coordinator.
+1. Observe fresh Set signature, target device identity, and current ChibiTap Capture value.
+2. Create an experiment/capture plan with source identity and musical range.
+3. Ensure trusted ChibiTap instances are already present at the desired signal points.
+4. Pre-arm the capture writer(s) without changing the audio path.
+5. Seek/play the requested musical range through typed transport control.
+6. Gate capture against the host timeline/range; until range gating lands, record lead/tail and trim only with explicit timing evidence.
+7. Stop transport and disarm capture.
+8. Wait until each WAV is stable on disk.
+9. Fingerprint each artifact with SHA-256 and verify format/sample rate/channel count plus non-zero/silence expectations.
+10. Analyze immutable captures and attach results to the experiment manifest.
+
+The single-Main ChibiTap path is already proven. The next coordinator must make steps 4-8 one typed, sample-aligned operation across multiple taps. Until then, the model must not substitute CUA for missing range/alignment semantics.
 ## Effect certainty
 Mutations and capture control use the same certainty principle as Chibi Core:
 - `NOT_STARTED`: no command/effect was issued.

@@ -116,3 +116,27 @@ The first-drop loudness ceiling does **not** look like a simple lack-of-bass pro
 The reference also suggests that apparent width should be investigated in VOX/FX/`other` material rather than widening low-end sources blindly. `All Over` obtains substantial width outside its separated bass/drums.
 
 These findings are hypotheses to A/B, not automatic mix instructions.
+
+## Typed ChibiTap capture proof - 2026-09-15
+
+The primary audio-plane path is now proven end-to-end in the real Chibi Lab Set. ChibiTap is the final device on Main and its host-visible `Capture` parameter is controlled only through the guarded `chibitap_capture` bridge capability plus bounded `capture_transport`. No Export Audio/Video dialog or CUA was used for the capture sequence.
+
+### Control capture
+
+The first typed capture targeted a musical range where the currently soloed `52-Serum 2` track had no arrangement clips. The resulting WAV was a valid 48 kHz stereo IEEE-float file containing silence. Re-reading the Set proved that silence was the actual Main output for that range, so the control demonstrated that ChibiTap records the host signal rather than fabricating activity.
+
+### Active-signal capture
+
+The same typed sequence was repeated over an active range of the soloed Serum track. The resulting capture was a real non-zero stereo float32 WAV. Measured evidence from that artifact included approximately:
+
+- **-1.02 dBTP** true peak;
+- **-12.51 LUFS** integrated over the captured window;
+- **13.7 dB crest**;
+- stereo correlation approximately **0.935**;
+- Side/Mid approximately **-14.7 dB**.
+
+This is not a new mix verdict because the Set was intentionally left in its existing solo state. It is infrastructure proof that real Ableton audio can be captured and analyzed without the Export dialog.
+
+### Remaining boundary
+
+The current capture sequence arms before playback and disarms after transport stop, so artifacts contain lead/tail around the requested musical range. The next audio-plane milestone is sample-aligned multi-tap capture: pre-arm writers, gate sample writes against one shared host timeline/range, map durable tap instance identity to Main/BASS/DRUMS/source tracks, and capture those signal points during one playback pass.

@@ -1,4 +1,4 @@
-﻿# Architecture
+# Architecture
 ## Authority model
 Chibi Core is the eventual workflow authority. Chibi Audio supplies typed production capabilities; it must not create a parallel scheduler, task database, or autonomous authority.
 The DAW bridge is an executor. The analysis stack is evidence. The artist remains the acceptance authority for subjective musical choices.
@@ -35,10 +35,25 @@ Only after read reconciliation is proven do we add bounded writes such as rename
 ## 3. UI accessibility is bootstrap observability, not steady-state authority
 Windows accessibility can currently expose a surprising amount of Live state and is useful for prototyping/verification. It is not the desired primary mutation path because UI layout and focus are less stable than typed Live objects.
 Use UI automation only for operations that genuinely lack a structured seam, and make that fallback explicit.
-## 4. Max for Live capture probe
-Use a small Max for Live device only for audio-rate capture/telemetry unavailable through the Remote Script. Chibi Audio now packages an MIT-licensed AgentAudioTap-derived probe for transparent pass-through capture.
-The probe records evidence; it does not own project state, MCP orchestration, planning or durable history. Capture control is a separate capability lane (`open/start/stop/status`) and does not imply device installation, soloing, seeking or transport control.
-See [connection-contract.md](connection-contract.md) and [capture-probe.md](capture-probe.md).
+## 4. Audio capture plane: ChibiTap VST3
+
+ChibiTap is the primary audio-rate evidence path. It is a deliberately small JUCE/VST3 effect that receives the real host audio buffer, leaves that buffer unchanged, and writes IEEE float32 capture evidence through JUCE `AudioFormatWriter::ThreadedWriter`.
+
+Responsibilities stay separated:
+- the Live Remote Script owns structured Ableton state, browser access, transport and narrowly authorized parameter control;
+- ChibiTap owns transparent audio observation only;
+- local Chibi Audio services own capture manifests, artifact hashing, analysis and experiment comparison;
+- Chibi Core remains the eventual workflow authority.
+
+The model-facing bridge exposes a dedicated `chibitap_capture` capability rather than a generic plugin setter. It currently refuses to act unless ChibiTap is the final Main device, its exact device identity and current Capture value match fresh observations, and any supplied Set signature still matches.
+
+The packaged Max for Live AgentAudioTap implementation remains available as an experimental/fallback adapter for Live-specific cases where Max provides unique value. It is not the primary capture foundation.
+
+### Current proof and next boundary
+
+Single-tap capture is proven in the real KISSKISSKISS lab Set with no Export Audio/Video dialog and no CUA. The remaining audio-plane boundary is deterministic range alignment: pre-arm writers, gate writes against host timeline/sample position, expose durable tap instance identity, and capture Main/BASS/DRUMS/source taps from the same musical range in one playback pass.
+
+See [connection-contract.md](connection-contract.md), [capture-probe.md](capture-probe.md), and `native/ChibiTap/README.md`.
 ## 5. Plugin knowledge base
 Build a machine-local logical-product catalog from the user's actual plugin installation and Live-visible devices.
 Useful fields:

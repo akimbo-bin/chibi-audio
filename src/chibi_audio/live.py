@@ -19,7 +19,7 @@ READ_ONLY_METHODS = frozenset(
         "browser_search",
     }
 )
-CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport"})
+CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_capture"})
 BOUNDED_WRITE_METHODS = frozenset({"parameter_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
@@ -169,6 +169,30 @@ class LiveCaptureClient(_LiveTransport):
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
         return self._request("capture_probe_refresh", params)
+
+
+    def set_chibitap_capture(
+        self,
+        enabled: bool,
+        *,
+        expected_current_value: float,
+        expected_set_signature: str | None = None,
+        expected_device_id: int | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if type(enabled) is not bool:
+            raise LiveBridgeError("enabled must be a boolean")
+        if verify_capability:
+            self._require_method("capture", "chibitap_capture")
+        params: dict[str, Any] = {
+            "enabled": enabled,
+            "expected_current_value": float(expected_current_value),
+        }
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        if expected_device_id is not None:
+            params["expected_device_id"] = int(expected_device_id)
+        return self._request("chibitap_capture", params)
 
 
     def transport(

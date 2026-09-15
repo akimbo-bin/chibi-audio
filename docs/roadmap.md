@@ -25,21 +25,34 @@ Scope:
 - reconcile Live state against the saved `.als` snapshot.
 Do not build broad write APIs yet. Do not expose arbitrary Python.
 **Acceptance:** a machine-readable live snapshot explains the open pilot Set and identifies saved-vs-unsaved differences without GUI scraping as the primary source.
-## R1.5 - Connection hardening and typed capture - ACTIVE
+## R1.5 - Connection hardening and typed audio capture - SINGLE-TAP PROVEN / MULTI-TAP NEXT
 Completed:
 - package the Remote Script bridge in this repository;
 - add an explicit capability handshake with separate read / bounded-write / capture lanes;
 - declare no silent GUI fallback and no arbitrary-code capability;
-- vendor the MIT AgentAudioTap Max for Live device and source;
-- add capture plan/manifest/stable-file hashing helpers;
-- add a reproducible installer and prove it against a fake User Library;
-- run unit tests without Live running.
-Remaining when Ableton is free:
-- install/activate the packaged bridge/probe version intentionally;
-- prove one typed capture from a known signal point;
-- build a range/transport coordinator so capture of a known bar range is one typed operation;
-- expand to aligned multi-probe capture only after the single-probe flow is stable.
-**Acceptance:** a normal A/B capture requires no CUA or Export Audio/Video dialog and produces a fingerprinted artifact linked to an experiment manifest.
+- keep the MIT AgentAudioTap Max for Live implementation as an experimental/fallback capture path;
+- add capture plan/manifest/stable-file hashing helpers and a reproducible bridge installer;
+- build ChibiTap as a JUCE 9.0.2 VST3 with transparent pass-through and float32 WAV capture;
+- replace the prototype custom FIFO/WAV writer with JUCE `AudioFormatWriter::ThreadedWriter`;
+- prove ChibiTap directly with a headless processor test and through the actual compiled VST3 wrapper with a host-side smoke test;
+- install ChibiTap in Live and expose a narrow guarded `chibitap_capture` method that can only toggle the final Main ChibiTap `Capture` parameter;
+- prove real Live capture through typed `chibitap_capture` + `capture_transport` with no Export Audio/Video dialog and no CUA;
+- verify the real artifact as 48 kHz stereo IEEE-float audio with non-zero mastered signal.
+
+Observed control proof: a first capture over a silent transport region produced a valid all-zero file; inspection showed the only soloed track had no clips in that range. Repeating the same typed capture over an active range produced real audio. This is desirable evidence that ChibiTap records the actual host signal rather than fabricating activity.
+
+Known limitation:
+- capture currently arms before transport and disarms after stop, so files include lead/tail around the requested musical window;
+- multiple instances are not yet sample-aligned by a shared capture-session/range contract.
+
+Next:
+- add a capture-session contract with target host timeline / beat range;
+- pre-arm writers before playback and gate writes from host playhead/sample position;
+- expose durable instance identity so the bridge can map `tap id -> Main / BASS / DRUMS / source track`;
+- prove synchronized Main/BASS/DRUMS capture in one playback pass;
+- wrap capture + stable-file fingerprint + analysis into one experiment operation.
+
+**Acceptance:** a normal A/B capture requires no CUA or Export Audio/Video dialog, produces a fingerprinted float32 artifact linked to an experiment manifest, and multiple taps can capture the same musical range with deterministic alignment.
 ## R2 - First reversible organization edit
 On the lab Set only:
 - checkpoint current state;
@@ -286,7 +299,7 @@ Expand the proven experiment loop to:
 - generalized sidechain relationships building on the verified R5.25 source-target graph;
 - per-section automation;
 - optional offline plugin-chain experiments;
-- optional audio-rate telemetry via a small Max for Live tap;
+- aligned audio-rate evidence through ChibiTap VST3 instances, with Max for Live retained only for specialized/fallback adapters;
 - perceptual/audibility/translation evidence proven in R5.5;
 - general goal-driven iterative optimization loops derived from the bounded R5.75 loudness workflow.
 ## R9 - Chibi / Ultron integration

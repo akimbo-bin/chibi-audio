@@ -34,7 +34,7 @@ MODEL_READ_METHODS = (
     "browser_capabilities", "browser_roots", "browser_search",
 )
 MODEL_BOUNDED_WRITE_METHODS = ("parameter_set",)
-MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport")
+MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_capture")
 MODEL_EXPOSED_METHODS = MODEL_READ_METHODS + MODEL_BOUNDED_WRITE_METHODS + MODEL_CAPTURE_METHODS
 AGENT_AUDIO_TAP_HOST = "127.0.0.1"
 AGENT_AUDIO_TAP_PORT = 17654
@@ -883,6 +883,34 @@ class AbletonLiveMCP(ControlSurface):
 
     def _agent_m4l_recovery_file(self, command_file):
         return "%s.recovery.json" % command_file
+
+    def _rpc_chibitap_capture(self, params):
+        track = self.song().master_track
+        devices = list(getattr(track, "devices", []))
+        if not devices or getattr(devices[-1], "name", "") != "ChibiTap":
+            raise RuntimeError("ChibiTap capture control requires ChibiTap to be the final Main device")
+        device = devices[-1]
+        device_id = self._object_id(device)
+        expected_device_id = params.get("expected_device_id")
+        if expected_device_id is not None and int(expected_device_id) != device_id:
+            raise RuntimeError("ChibiTap device identity changed since inspection; refusing capture toggle")
+        matches = [param for param in getattr(device, "parameters", []) if getattr(param, "name", "") == "Capture"]
+        if len(matches) != 1:
+            raise RuntimeError("Expected exactly one ChibiTap Capture parameter; found %s" % len(matches))
+        capture = matches[0]
+        before = self._parameter_summary(capture)
+        expected_current = params.get("expected_current_value")
+        if expected_current is None:
+            raise ValueError("expected_current_value is required")
+        if abs(float(before.get("value")) - float(expected_current)) > 1e-6:
+            raise RuntimeError("ChibiTap Capture changed since inspection; refusing toggle")
+        enabled = params.get("enabled")
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be a boolean")
+        capture.value = 1.0 if enabled else 0.0
+        after = self._parameter_summary(capture)
+        return {"device": {"id": device_id, "name": "ChibiTap"}, "before": before, "parameter": after, "enabled": enabled, "changed": after.get("value") != before.get("value")}
+
 
     def _rpc_capture_transport(self, params):
         action = params.get("action") or "status"

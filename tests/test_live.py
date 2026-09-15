@@ -86,6 +86,27 @@ def test_capture_probe_setup_is_master_only():
     assert params["placement"] == "master"
     assert params["expected_set_signature"] == "sig-1"
 
+def test_chibitap_capture_is_explicit_and_guarded():
+    assert "chibitap_capture" in CAPTURE_METHODS
+    client = FakeCaptureClient()
+    result = client.set_chibitap_capture(
+        True,
+        expected_current_value=0.0,
+        expected_set_signature="sig-3",
+        expected_device_id=1234,
+    )
+    assert result["method"] == "chibitap_capture"
+    params = client.calls[-1][1]
+    assert params == {
+        "enabled": True,
+        "expected_current_value": 0.0,
+        "expected_set_signature": "sig-3",
+        "expected_device_id": 1234,
+    }
+    with pytest.raises(LiveBridgeError, match="enabled must be a boolean"):
+        client.set_chibitap_capture(1, expected_current_value=0.0)
+
+
 def test_capture_transport_seek_and_guards():
     client = FakeCaptureClient()
     result = client.transport("seek", time=68.0, expected_set_signature="sig-2")

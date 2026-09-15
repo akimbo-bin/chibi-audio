@@ -21,7 +21,7 @@ A user-supplied reference track can be analyzed locally as another evidence sour
 - Reconciled saved-state + live-state project model.
 - Machine-local plugin and sample indexes.
 - Section-aware audio analysis and a reversible A/B experiment engine.
-- Packaged Max for Live capture probe for deterministic audio evidence without repetitive Export-dialog automation.
+- ChibiTap JUCE/VST3 audio plane for deterministic float32 capture without repetitive Export-dialog automation; Max for Live remains an experimental/fallback adapter.
 - Eventual Chibi Core / Ultron integration, with Chibi Core remaining the workflow authority.
 Existing Ableton MCP/OSC projects are treated as upstream components and references, not as a second authority. See [docs/ecosystem-research.md](docs/ecosystem-research.md).
 ## Status
@@ -35,6 +35,8 @@ Already proven on the real pilot project:
 - structured Live bridge reads proven against the real Set;
 - saved/live track reconciliation proven;
 - one bounded source-level write + same-session A/B proof;
-- packaged bridge + AgentAudioTap capture probe with a reproducible installer.
-Next acceptance boundary: **activate the packaged capture path when Ableton is available, replace repeated GUI export work with typed capture, and then resume reversible mix experiments.**
+- packaged bridge + AgentAudioTap fallback probe with a reproducible installer;
+- ChibiTap VST3 core and real-wrapper host tests proving transparent pass-through and non-zero float32 capture;
+- real Ableton ChibiTap capture through typed `chibitap_capture` + `capture_transport`, with no Export dialog or CUA.
+Next acceptance boundary: **make ChibiTap captures range-exact and sample-aligned across multiple instances, then use Main/BASS/DRUMS/source taps for one-command A/B and loudness-stress experiments.**
 See [VISION.md](VISION.md), [docs/architecture.md](docs/architecture.md), [docs/roadmap.md](docs/roadmap.md), [docs/pilot-kisskisskiss.md](docs/pilot-kisskisskiss.md), [docs/connection-contract.md](docs/connection-contract.md), [docs/capture-probe.md](docs/capture-probe.md), and [AGENTS.md](AGENTS.md).
