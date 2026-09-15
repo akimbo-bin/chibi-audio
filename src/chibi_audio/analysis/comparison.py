@@ -131,6 +131,85 @@ def compare_reports(
                 "side_to_mid_db_delta": _delta(a, b, "side_to_mid_db"),
             }
 
+    stereo_timeline_key = AnalysisCapability.STEREO_TIMELINE.value
+    if stereo_timeline_key in common:
+        a = left.measurements[stereo_timeline_key]
+        b = right.measurements[stereo_timeline_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[stereo_timeline_key] = {
+                "left_available": a.get("available"),
+                "right_available": b.get("available"),
+                "correlation_median_delta": _nested_delta(a, b, "correlation", "median"),
+                "correlation_p10_delta": _nested_delta(a, b, "correlation", "p10"),
+                "side_energy_fraction_median_delta": _nested_delta(
+                    a, b, "side_energy_fraction", "median"
+                ),
+                "side_energy_fraction_p90_delta": _nested_delta(
+                    a, b, "side_energy_fraction", "p90"
+                ),
+                "left_minus_right_rms_db_median_delta": _nested_delta(
+                    a, b, "left_minus_right_rms_db", "median"
+                ),
+                "widest_sampled_side_energy_fraction_delta": _nested_delta(
+                    a, b, "widest_sampled_window", "side_energy_fraction"
+                ),
+                "most_negative_correlation_delta": _nested_delta(
+                    a, b, "most_negative_correlation_window", "correlation"
+                ),
+            }
+
+    loop_seam_key = AnalysisCapability.LOOP_SEAM.value
+    if loop_seam_key in common:
+        a = left.measurements[loop_seam_key]
+        b = right.measurements[loop_seam_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[loop_seam_key] = {
+                "left_available": a.get("available"),
+                "right_available": b.get("available"),
+                "max_abs_endpoint_jump_delta": _delta(a, b, "max_abs_endpoint_jump"),
+                "endpoint_jump_relative_to_peak_delta": _delta(
+                    a, b, "endpoint_jump_relative_to_peak"
+                ),
+                "max_abs_derivative_discontinuity_delta": _delta(
+                    a, b, "max_abs_derivative_discontinuity"
+                ),
+                "derivative_discontinuity_relative_to_peak_delta": _delta(
+                    a, b, "derivative_discontinuity_relative_to_peak"
+                ),
+                "head_minus_tail_rms_db_delta": _delta(a, b, "head_minus_tail_rms_db"),
+                "head_tail_waveform_rmse_relative_to_peak_delta": _delta(
+                    a, b, "head_tail_waveform_rmse_relative_to_peak"
+                ),
+                "head_tail_waveform_correlation_delta": _delta(
+                    a, b, "head_tail_waveform_correlation"
+                ),
+            }
+
+    integrity_key = AnalysisCapability.INTEGRITY.value
+    if integrity_key in common:
+        a = left.measurements[integrity_key]
+        b = right.measurements[integrity_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[integrity_key] = {
+                "max_abs_dc_offset_delta": _delta(a, b, "max_abs_dc_offset"),
+                "near_full_scale_frame_count_delta": _delta(
+                    a, b, "near_full_scale_frame_count"
+                ),
+                "near_full_scale_run_count_delta": _delta(a, b, "near_full_scale_run_count"),
+                "sustained_silence_run_count_delta": _delta(
+                    a, b, "sustained_silence_run_count"
+                ),
+                "longest_sustained_silence_seconds_delta": _delta(
+                    a, b, "longest_sustained_silence_seconds"
+                ),
+                "discontinuity_candidate_count_delta": _delta(
+                    a, b, "discontinuity_candidate_count"
+                ),
+                "discontinuity_threshold_sample_step_delta": _delta(
+                    a, b, "discontinuity_threshold_sample_step"
+                ),
+            }
+
     spectrum_key = AnalysisCapability.SPECTRUM.value
     if spectrum_key in common:
         a = left.measurements[spectrum_key]
@@ -166,9 +245,7 @@ def compare_reports(
                         continue
                     band_deltas[name] = {
                         "median_fraction_delta": _delta(first, second, "median_fraction"),
-                        "p90_minus_p10_fraction_delta": _delta(
-                            first, second, "p90_minus_p10_fraction"
-                        ),
+                        "p90_minus_p10_fraction_delta": _delta(first, second, "p90_minus_p10_fraction"),
                     }
             comparisons[spectral_timeline_key] = {
                 "spectral_centroid_median_hz_delta": _nested_delta(
