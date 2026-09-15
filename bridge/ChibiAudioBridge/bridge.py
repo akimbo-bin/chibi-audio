@@ -1,4 +1,4 @@
-from __future__ import absolute_import, print_function
+﻿from __future__ import absolute_import, print_function
 
 import json
 import hashlib
@@ -34,7 +34,7 @@ MODEL_READ_METHODS = (
     "browser_capabilities", "browser_roots", "browser_search",
 )
 MODEL_BOUNDED_WRITE_METHODS = ("parameter_set",)
-MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh")
+MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh", "chibitap_remove")
 MODEL_EXPOSED_METHODS = MODEL_READ_METHODS + MODEL_BOUNDED_WRITE_METHODS + MODEL_CAPTURE_METHODS
 AGENT_AUDIO_TAP_HOST = "127.0.0.1"
 AGENT_AUDIO_TAP_PORT = 17654
@@ -2521,42 +2521,113 @@ class AbletonLiveMCP(ControlSurface):
     def _chibitap_parameter_map(self, device):
         return dict((getattr(parameter, "name", ""), parameter) for parameter in getattr(device, "parameters", []))
 
+    def _chibitap_signal_point_insert_index(self, track, signal_point):
+        signal_point = str(signal_point or "post_fx")
+        if signal_point not in ("post_fx", "pre_fx", "post_instrument"):
+            raise ValueError("signal_point must be post_fx, pre_fx, or post_instrument")
+        devices = list(getattr(track, "devices", []))
+        if signal_point == "post_fx":
+            return -1
+        if signal_point == "pre_fx":
+            for index, device in enumerate(devices):
+                try:
+                    if int(getattr(device, "type")) == 2:
+                        return index
+                except Exception:
+                    continue
+            return -1
+        instruments = []
+        for index, device in enumerate(devices):
+            try:
+                if int(getattr(device, "type")) == 1:
+                    instruments.append(index)
+            except Exception:
+                continue
+        if len(instruments) != 1:
+            raise RuntimeError("post_instrument requires exactly one instrument device; found %s" % len(instruments))
+        return instruments[0] + 1
+
+    def _chibitap_signal_point_index(self, track, device, signal_point):
+        devices = list(getattr(track, "devices", []))
+        actual = None
+        for index, candidate in enumerate(devices):
+            if self._same_live_object(candidate, device):
+                actual = index
+                break
+        if actual is None:
+            raise RuntimeError("ChibiTap disappeared from target track")
+        signal_point = str(signal_point or "post_fx")
+        if signal_point == "post_fx":
+            expected = len(devices) - 1
+        elif signal_point == "pre_fx":
+            expected = None
+            for index, candidate in enumerate(devices):
+                try:
+                    if int(getattr(candidate, "type")) == 2:
+                        expected = index
+                        break
+                except Exception:
+                    continue
+            if expected is None:
+                expected = len(devices) - 1
+        elif signal_point == "post_instrument":
+            instruments = []
+            for index, candidate in enumerate(devices):
+                try:
+                    if int(getattr(candidate, "type")) == 1:
+                        instruments.append(index)
+                except Exception:
+                    continue
+            if len(instruments) != 1:
+                raise RuntimeError("post_instrument requires exactly one instrument device; found %s" % len(instruments))
+            expected = instruments[0] + 1
+        else:
+            raise ValueError("signal_point must be post_fx, pre_fx, or post_instrument")
+        if actual != expected:
+            raise RuntimeError("ChibiTap signal-point mismatch: %s expected index %s, found %s" % (signal_point, expected, actual))
+        return actual
+
     def _rpc_chibitap_setup(self, params):
         track, track_ref = self._chibitap_target_track(params)
+        signal_point = str(params.get("signal_point") or "post_fx")
         devices = list(getattr(track, "devices", []))
         matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
         if len(matches) > 1:
             raise RuntimeError("Expected at most one ChibiTap on target track; found %s" % len(matches))
         loaded = False
         if not matches:
+            insert_index = self._chibitap_signal_point_insert_index(track, signal_point)
             result = self._rpc_load_device({"name": "ChibiTap", "name_exact": True, "roots": ["plugins"], "target_track": track_ref, "max_depth": 12, "max_visited": 20000})
             if result.get("ambiguous"):
                 raise RuntimeError("ChibiTap browser lookup was ambiguous")
             loaded = bool(result.get("loaded"))
             devices = list(getattr(track, "devices", []))
             matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
+            if len(matches) == 1 and signal_point != "post_fx":
+                self.song().move_device(matches[0], track, insert_index)
+                devices = list(getattr(track, "devices", []))
+                matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
         if len(matches) != 1:
             raise RuntimeError("Expected exactly one ChibiTap after setup; found %s" % len(matches))
         device = matches[0]
-        if devices[-1] is not device:
-            raise RuntimeError("ChibiTap must be the final device on its target track")
+        device_index = self._chibitap_signal_point_index(track, device, signal_point)
         pmap = self._chibitap_parameter_map(device)
         if "Capture" not in pmap or "Tap ID" not in pmap:
             raise RuntimeError("ChibiTap does not expose the required 0.2.0 Capture + Tap ID layout")
         capture_summary = self._parameter_summary(pmap["Capture"])
         if abs(float(capture_summary.get("value"))) > 1e-6:
             raise RuntimeError("ChibiTap Capture must be Off after setup")
-        return {"loaded": loaded, "track": {"id": self._object_id(track), "name": getattr(track, "name", "")}, "device": {"id": self._object_id(device), "name": "ChibiTap"}, "parameters": {"Capture": capture_summary, "Tap ID": self._parameter_summary(pmap["Tap ID"]), "tap_id_integer": int(round(float(getattr(pmap["Tap ID"], "value", 0.0)) * 9999.0))}}
+        return {"loaded": loaded, "signal_point": signal_point, "device_index": device_index, "track": {"id": self._object_id(track), "name": getattr(track, "name", "")}, "device": {"id": self._object_id(device), "name": "ChibiTap"}, "parameters": {"Capture": capture_summary, "Tap ID": self._parameter_summary(pmap["Tap ID"]), "tap_id_integer": int(round(float(getattr(pmap["Tap ID"], "value", 0.0)) * 9999.0))}}
 
     def _rpc_chibitap_configure(self, params):
         track, _track_ref = self._chibitap_target_track(params)
+        signal_point = str(params.get("signal_point") or "post_fx")
         devices = list(getattr(track, "devices", []))
         matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
         if len(matches) != 1:
             raise RuntimeError("Expected exactly one ChibiTap on target track; found %s" % len(matches))
         device = matches[0]
-        if devices[-1] is not device:
-            raise RuntimeError("ChibiTap must be the final device on its target track")
+        device_index = self._chibitap_signal_point_index(track, device, signal_point)
         device_id = self._object_id(device)
         expected_device_id = params.get("expected_device_id")
         if expected_device_id is None or int(expected_device_id) != device_id:
@@ -2601,6 +2672,36 @@ class AbletonLiveMCP(ControlSurface):
             changed = changed or enabled != current_enabled
         after_capture = self._parameter_summary(capture)
         after_tap = self._parameter_summary(tap)
-        return {"track": {"id": self._object_id(track), "name": getattr(track, "name", "")}, "device": {"id": device_id, "name": "ChibiTap"}, "before": {"Capture": before_capture, "Tap ID": before_tap}, "parameters": {"Capture": after_capture, "Tap ID": after_tap, "tap_id_integer": int(round(float(after_tap.get("value")) * 9999.0))}, "changed": changed}
+        return {"signal_point": signal_point, "device_index": device_index, "track": {"id": self._object_id(track), "name": getattr(track, "name", "")}, "device": {"id": device_id, "name": "ChibiTap"}, "before": {"Capture": before_capture, "Tap ID": before_tap}, "parameters": {"Capture": after_capture, "Tap ID": after_tap, "tap_id_integer": int(round(float(after_tap.get("value")) * 9999.0))}, "changed": changed}
+
+    def _rpc_chibitap_remove(self, params):
+        track, _track_ref = self._chibitap_target_track(params)
+        signal_point = str(params.get("signal_point") or "post_fx")
+        devices = list(getattr(track, "devices", []))
+        matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
+        if len(matches) != 1:
+            raise RuntimeError("Expected exactly one ChibiTap on target track; found %s" % len(matches))
+        device = matches[0]
+        device_index = self._chibitap_signal_point_index(track, device, signal_point)
+        device_id = self._object_id(device)
+        expected_device_id = params.get("expected_device_id")
+        if expected_device_id is None or int(expected_device_id) != device_id:
+            raise RuntimeError("ChibiTap device identity changed since inspection; refusing remove")
+        if params.get("expected_capture_enabled") is not False:
+            raise ValueError("chibitap_remove requires expected_capture_enabled=false")
+        pmap = self._chibitap_parameter_map(device)
+        capture = pmap.get("Capture")
+        if capture is None:
+            raise RuntimeError("ChibiTap Capture parameter is unavailable")
+        capture_summary = self._parameter_summary(capture)
+        if float(capture_summary.get("value", 0.0)) >= 0.5:
+            raise RuntimeError("ChibiTap Capture must be Off before remove")
+        if not hasattr(track, "delete_device"):
+            raise RuntimeError("Target track does not expose delete_device")
+        track.delete_device(device_index)
+        remaining = [candidate for candidate in getattr(track, "devices", []) if getattr(candidate, "name", "") == "ChibiTap"]
+        if remaining:
+            raise RuntimeError("ChibiTap removal did not leave the target track clean")
+        return {"removed": True, "signal_point": signal_point, "device_index": device_index, "device": {"id": device_id, "name": "ChibiTap"}, "track": {"id": self._object_id(track), "name": getattr(track, "name", "")}}
 
 AbletonObjectMCP = AbletonLiveMCP

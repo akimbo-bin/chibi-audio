@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 
 def test_capture_seek_sets_absolute_song_time():
@@ -29,3 +29,15 @@ def test_capture_play_until_is_scheduled_inside_live():
     assert 'action not in ("status", "seek", "play", "stop", "play_until")' in source
     assert "self.schedule_message(1, check)" in source
     assert 'result["last_scheduled_stop_time"]' in source
+
+
+def test_chibitap_signal_points_use_indexed_insertion():
+    source = Path("bridge/ChibiAudioBridge/bridge.py").read_text(encoding="utf-8")
+    capture_line = next(line for line in source.splitlines() if line.startswith("MODEL_CAPTURE_METHODS"))
+    assert "chibitap_remove" in capture_line
+    assert "signal_point must be post_fx, pre_fx, or post_instrument" in source
+    assert "self.song().move_device(matches[0], track, insert_index)" in source
+    assert "_chibitap_signal_point_index" in source
+    assert "def _rpc_chibitap_remove" in source
+    assert "load_device" not in capture_line
+    assert "track_insert_device" not in capture_line

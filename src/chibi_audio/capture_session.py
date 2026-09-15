@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
@@ -149,6 +149,62 @@ def resolve_session_taps(
     return resolved
 
 
+def _capture_mixer_state(summary: dict[str, Any], taps: Iterable[ResolvedSessionTap]) -> dict[str, Any]:
+    tracks = list(summary.get("tracks") or [])
+    by_id = {
+        int(track["id"]): track
+        for track in tracks
+        if track.get("id") is not None
+    }
+    active_solos = [
+        {
+            "id": int(track["id"]),
+            "index": int(track["index"]) if track.get("index") is not None else None,
+            "name": str(track.get("name") or ""),
+        }
+        for track in tracks
+        if bool(track.get("solo")) and track.get("id") is not None
+    ]
+    targets: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    for tap in taps:
+        track = (summary.get("master_track") or {}) if tap.placement == "master" else by_id.get(tap.track_id, {})
+        target = {
+            "tap_id": tap.tap_id,
+            "source_label": tap.source_label,
+            "placement": tap.placement,
+            "track_id": tap.track_id,
+            "track_index": tap.track_index,
+            "track_name": tap.track_name,
+            "mute": bool(track.get("mute", False)),
+            "solo": bool(track.get("solo", False)),
+            "solo_suppression_risk": bool(active_solos and tap.placement != "master" and not bool(track.get("solo", False))),
+        }
+        targets.append(target)
+        if target["mute"]:
+            warnings.append(
+                f"Tap {tap.tap_id} target {tap.track_name!r} is muted; its capture may be silent."
+            )
+        if target["solo_suppression_risk"]:
+            warnings.append(
+                f"Tap {tap.tap_id} target {tap.track_name!r} is not soloed while Live has active solos; its capture may be suppressed."
+            )
+
+    if active_solos:
+        warnings.insert(
+            0,
+            "Live has active solo tracks; non-soloed tap targets may capture silence or a partial bus.",
+        )
+
+    return {
+        "active_solos": active_solos,
+        "active_solo_count": len(active_solos),
+        "tap_targets": targets,
+        "warnings": warnings,
+    }
+
+
 def _files_for_tap(root: Path, tap_id: int) -> set[Path]:
     if not root.exists():
         return set()
@@ -210,6 +266,7 @@ def run_capture_session(
     )
     song_properties = song.get("properties") or {}
     resolved = resolve_session_taps(read_client, summary, taps)
+    mixer_state = _capture_mixer_state(summary, resolved)
 
     root = Path(capture_root) if capture_root is not None else default_capture_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -312,6 +369,7 @@ def run_capture_session(
         "transport_start_beat": transport_start,
         "transport_stop_beat": transport_stop,
         "tap_mapping": [asdict(tap) for tap in resolved],
+        "mixer_state": mixer_state,
         "raw_stable_artifacts": {str(key): value for key, value in raw_artifacts.items()},
     }
     _atomic_write_json(manifest_path, manifest)
