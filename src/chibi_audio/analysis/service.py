@@ -7,12 +7,14 @@ from pathlib import Path
 import tempfile
 from typing import Iterable, Protocol
 
+from .basic_pitch_adapter import BasicPitchTranscriptionAnalyzer
 from .core import default_core_analyzers
 from .io import AnalysisContext
 from .librosa_adapter import LibrosaMirAnalyzer
 from .loudness import FfmpegLoudnessAnalyzer
 from .models import SCHEMA_VERSION, AnalysisReport, AnalysisRequest, AnalyzerDescriptor
 from .production import production_analyzers
+from .semantic import HfClapSemanticAnalyzer
 
 
 class AnalysisUnavailable(ValueError):
@@ -40,6 +42,8 @@ class AnalyzerRegistry:
                 *production_analyzers(),
                 FfmpegLoudnessAnalyzer(),
                 LibrosaMirAnalyzer(),
+                BasicPitchTranscriptionAnalyzer(),
+                HfClapSemanticAnalyzer(),
             )
         )
 

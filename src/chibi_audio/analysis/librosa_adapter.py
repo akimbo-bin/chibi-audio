@@ -30,10 +30,11 @@ def librosa_descriptor() -> AnalyzerDescriptor:
                 AnalysisCapability.MIR_ONSETS,
                 AnalysisCapability.MIR_TONAL,
                 AnalysisCapability.MIR_STRUCTURE,
+                AnalysisCapability.MIR_PITCH,
             }
         ),
         cost=AnalysisCost.MODERATE,
-        implementation="librosa onset / tempo / chroma / bounded novelty evidence",
+        implementation="librosa onset / tempo / chroma / pYIN pitch / bounded novelty evidence",
         upstream="librosa/librosa",
         license="ISC",
         available=available,
@@ -97,6 +98,74 @@ def _structure_boundaries(librosa, np, mono, sr: int, absolute_start: float) -> 
     }
 
 
+def _pitch_evidence(librosa, np, mono, sr: int) -> dict[str, Any]:
+    hop_length = 512
+    nyquist_guard = sr * 0.49
+    fmin = float(librosa.note_to_hz("C1"))
+    fmax = min(float(librosa.note_to_hz("C8")), nyquist_guard)
+    if fmax <= fmin:
+        return {
+            "voiced_frame_fraction": 0.0,
+            "median_hz": None,
+            "p10_hz": None,
+            "p90_hz": None,
+            "median_midi": None,
+            "pitch_range_p10_to_p90_semitones": None,
+            "median_pitch_class_evidence": None,
+            "median_voicing_probability": None,
+            "hop_length_samples": hop_length,
+            "interpretation_note": "pYIN evidence is for predominantly monophonic material; it does not transcribe chords",
+        }
+
+    f0, voiced_flag, voiced_probability = librosa.pyin(
+        mono,
+        fmin=fmin,
+        fmax=fmax,
+        sr=sr,
+        frame_length=2048,
+        hop_length=hop_length,
+    )
+    finite = np.isfinite(f0)
+    total_frames = max(1, len(f0))
+    voiced_hz = np.asarray(f0[finite], dtype=np.float64)
+    if not voiced_hz.size:
+        return {
+            "voiced_frame_fraction": 0.0,
+            "median_hz": None,
+            "p10_hz": None,
+            "p90_hz": None,
+            "median_midi": None,
+            "pitch_range_p10_to_p90_semitones": None,
+            "median_pitch_class_evidence": None,
+            "median_voicing_probability": None,
+            "hop_length_samples": hop_length,
+            "interpretation_note": "pYIN evidence is for predominantly monophonic material; it does not transcribe chords",
+        }
+
+    midi = np.asarray(librosa.hz_to_midi(voiced_hz), dtype=np.float64)
+    median_midi = float(np.median(midi))
+    p10_midi = float(np.percentile(midi, 10))
+    p90_midi = float(np.percentile(midi, 90))
+    median_pitch_class = _PITCH_CLASSES[int(round(median_midi)) % 12]
+    probability = np.asarray(voiced_probability, dtype=np.float64)
+    finite_probability = probability[finite & np.isfinite(probability)]
+
+    return {
+        "voiced_frame_fraction": float(np.count_nonzero(finite) / total_frames),
+        "median_hz": float(np.median(voiced_hz)),
+        "p10_hz": float(np.percentile(voiced_hz, 10)),
+        "p90_hz": float(np.percentile(voiced_hz, 90)),
+        "median_midi": median_midi,
+        "pitch_range_p10_to_p90_semitones": p90_midi - p10_midi,
+        "median_pitch_class_evidence": median_pitch_class,
+        "median_voicing_probability": (
+            float(np.median(finite_probability)) if finite_probability.size else None
+        ),
+        "hop_length_samples": hop_length,
+        "interpretation_note": "pYIN evidence is for predominantly monophonic material; it does not transcribe chords",
+    }
+
+
 class LibrosaMirAnalyzer:
     @property
     def descriptor(self) -> AnalyzerDescriptor:
@@ -155,6 +224,9 @@ class LibrosaMirAnalyzer:
                 "tonal_concentration": float(np.max(normalized)) if total > 0 else None,
                 "interpretation_note": "dominant pitch class is evidence only; this analyzer does not claim musical key",
             }
+
+        if AnalysisCapability.MIR_PITCH in requested:
+            result[AnalysisCapability.MIR_PITCH.value] = _pitch_evidence(librosa, np, mono, sr)
 
         if AnalysisCapability.MIR_STRUCTURE in requested:
             novelty = _structure_boundaries(

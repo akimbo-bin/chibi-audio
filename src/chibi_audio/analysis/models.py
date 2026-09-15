@@ -21,6 +21,9 @@ class AnalysisCapability(StrEnum):
     MIR_ONSETS = "audio.mir.onsets"
     MIR_TONAL = "audio.mir.tonal"
     MIR_STRUCTURE = "audio.mir.structure"
+    MIR_PITCH = "audio.mir.pitch"
+    MIR_TRANSCRIPTION = "audio.mir.transcription"
+    SEMANTIC = "audio.semantic"
 
 
 class AnalysisCost(StrEnum):
@@ -58,15 +61,19 @@ class AnalysisRequest:
     spectral_window_size: int = 4096
     spectral_max_windows: int = 16
     spectral_rolloff_fraction: float = 0.85
+    semantic_queries: tuple[str, ...] = ()
+    semantic_max_windows: int = 12
+    transcription_max_notes: int = 512
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "capabilities",
-            frozenset(AnalysisCapability(value) for value in self.capabilities),
-        )
+        capabilities = frozenset(AnalysisCapability(value) for value in self.capabilities)
+        object.__setattr__(self, "capabilities", capabilities)
         object.__setattr__(self, "max_cost", AnalysisCost(self.max_cost))
-        if not self.capabilities:
+
+        semantic_queries = tuple(str(value).strip() for value in self.semantic_queries)
+        object.__setattr__(self, "semantic_queries", semantic_queries)
+
+        if not capabilities:
             raise ValueError("at least one analysis capability is required")
         if self.start_seconds is not None and self.start_seconds < 0:
             raise ValueError("start_seconds must be >= 0")
@@ -88,6 +95,18 @@ class AnalysisRequest:
             raise ValueError("spectral_max_windows must be between 1 and 256")
         if not 0.5 <= self.spectral_rolloff_fraction < 1.0:
             raise ValueError("spectral_rolloff_fraction must be in [0.5, 1.0)")
+        if len(semantic_queries) > 64:
+            raise ValueError("semantic_queries is limited to 64 prompts")
+        if any(not value for value in semantic_queries):
+            raise ValueError("semantic_queries cannot contain empty prompts")
+        if any(len(value) > 240 for value in semantic_queries):
+            raise ValueError("each semantic query is limited to 240 characters")
+        if AnalysisCapability.SEMANTIC in capabilities and not semantic_queries:
+            raise ValueError("audio.semantic requires at least one semantic query")
+        if not 1 <= self.semantic_max_windows <= 64:
+            raise ValueError("semantic_max_windows must be between 1 and 64")
+        if not 1 <= self.transcription_max_notes <= 4096:
+            raise ValueError("transcription_max_notes must be between 1 and 4096")
 
     def cache_payload(self) -> dict[str, Any]:
         return {
@@ -100,6 +119,9 @@ class AnalysisRequest:
             "spectral_window_size": self.spectral_window_size,
             "spectral_max_windows": self.spectral_max_windows,
             "spectral_rolloff_fraction": self.spectral_rolloff_fraction,
+            "semantic_queries": list(self.semantic_queries),
+            "semantic_max_windows": self.semantic_max_windows,
+            "transcription_max_notes": self.transcription_max_notes,
         }
 
 
