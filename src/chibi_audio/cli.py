@@ -85,7 +85,11 @@ def main() -> None:
         action="append",
         type=_session_tap_arg,
         required=True,
-        help="Repeat TAP_ID:LABEL:TARGET; TARGET is master/Main or an exact Live track name",
+        help=(
+            "Repeat TAP_ID:LABEL:TARGET (defaults to post_fx) or "
+            "TAP_ID:LABEL:SIGNAL_POINT:TARGET; SIGNAL_POINT is post_fx, pre_fx, "
+            "or post_instrument and TARGET is master/Main or an exact Live track name"
+        ),
     )
     capture_session.add_argument("--output-dir", required=True)
     capture_session.add_argument("--start-beat", type=float, required=True)
