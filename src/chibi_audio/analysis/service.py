@@ -10,6 +10,7 @@ from typing import Iterable, Protocol
 from .basic_pitch_adapter import BasicPitchTranscriptionAnalyzer
 from .continuity import continuity_analyzers
 from .core import default_core_analyzers
+from .integrity import integrity_analyzers
 from .io import AnalysisContext
 from .librosa_adapter import LibrosaMirAnalyzer
 from .loudness import FfmpegLoudnessAnalyzer
@@ -45,6 +46,7 @@ class AnalyzerRegistry:
                 *production_analyzers(),
                 *timeline_analyzers(),
                 *continuity_analyzers(),
+                *integrity_analyzers(),
                 FfmpegLoudnessAnalyzer(),
                 LibrosaMirAnalyzer(),
                 LibrosaTimbreAnalyzer(),
