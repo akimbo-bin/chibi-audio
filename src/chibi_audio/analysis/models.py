@@ -26,7 +26,11 @@ class AnalysisCost(StrEnum):
 
     @property
     def rank(self) -> int:
-        return {self.CHEAP: 0, self.MODERATE: 1, self.EXPENSIVE: 2}[self]
+        return {
+            AnalysisCost.CHEAP: 0,
+            AnalysisCost.MODERATE: 1,
+            AnalysisCost.EXPENSIVE: 2,
+        }[self]
 
 
 BASIC_CAPABILITIES = frozenset(
