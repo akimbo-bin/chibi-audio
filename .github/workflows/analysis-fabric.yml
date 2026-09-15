@@ -1,0 +1,28 @@
+name: Analysis fabric
+
+on:
+  push:
+    branches:
+      - feat/analysis-fabric-8
+    paths:
+      - "src/chibi_audio/analysis/**"
+      - "tests/test_analysis_fabric.py"
+      - ".github/workflows/analysis-fabric.yml"
+  pull_request:
+    paths:
+      - "src/chibi_audio/analysis/**"
+      - "tests/test_analysis_fabric.py"
+      - ".github/workflows/analysis-fabric.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[analysis]' pytest
+      - run: python -m compileall -q src/chibi_audio/analysis
+      - run: pytest -q tests/test_analysis_fabric.py
