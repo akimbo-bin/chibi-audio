@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 
 import pytest
@@ -31,6 +31,7 @@ class FakeReadClient:
                 "devices": [{"id": 101, "name": "ChibiTap"}],
             },
         }
+        self.device_types = {101: 2, 201: 2}
 
     def set_summary(self, **_kwargs):
         return self.summary
@@ -44,6 +45,13 @@ class FakeReadClient:
                 {"name": "Tap ID", "value": tap_id / 9999.0, "display": str(tap_id)},
             ]
         if method == "get":
+            ref = params.get("ref") or {}
+            if ref.get("id") is not None:
+                device_id = int(ref["id"])
+                return {
+                    "id": device_id,
+                    "properties": {"type": self.device_types[device_id]},
+                }
             return {
                 "properties": {
                     "name": "Test Set",
@@ -107,12 +115,27 @@ class FakeCaptureClient:
 
     def configure_chibitap(self, **kwargs):
         self.calls.append(("configure", kwargs))
-        return {"changed": True}
+        return {
+            "changed": True,
+            "signal_point": kwargs["signal_point"],
+            "device_index": 0,
+            "device": {"id": kwargs["expected_device_id"], "name": "ChibiTap"},
+        }
 
 
 def test_parse_and_resolve_session_taps():
     spec = parse_session_tap("2:BASS:BASS")
     assert spec == CaptureSessionTap(2, "BASS", "BASS")
+    assert spec.signal_point == "post_fx"
+
+    pre = parse_session_tap("2:BASS_PRE:pre_fx:BUS:BASS")
+    assert pre == CaptureSessionTap(2, "BASS_PRE", "BUS:BASS", "pre_fx")
+
+    legacy_colon = parse_session_tap("2:BASS:BUS:BASS")
+    assert legacy_colon == CaptureSessionTap(2, "BASS", "BUS:BASS", "post_fx")
+
+    with pytest.raises(CaptureError, match="signal_point"):
+        CaptureSessionTap(2, "BASS", "BASS", "middle")
 
     reader = FakeReadClient()
     resolved = resolve_session_taps(
@@ -125,6 +148,8 @@ def test_parse_and_resolve_session_taps():
         (2, "BASS", 201),
     ]
     assert resolved[0].placement == "master"
+    assert resolved[0].signal_point == "post_fx"
+    assert resolved[0].device_index == 0
     assert resolved[1].track_index == 34
 
     with pytest.raises(CaptureError, match="duplicate tap_id"):
@@ -132,6 +157,55 @@ def test_parse_and_resolve_session_taps():
             reader,
             reader.summary,
             [CaptureSessionTap(1, "Main", "master"), CaptureSessionTap(1, "Bass", "BASS")],
+        )
+
+
+def test_resolve_session_taps_verifies_pre_fx_and_post_instrument_signal_points():
+    reader = FakeReadClient()
+    track = reader.summary["tracks"][0]
+
+    track["devices"] = [
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+    ]
+    reader.device_types[202] = 2
+    pre_fx = resolve_session_taps(
+        reader,
+        reader.summary,
+        [CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx")],
+    )[0]
+    assert pre_fx.signal_point == "pre_fx"
+    assert pre_fx.device_index == 0
+    assert pre_fx.configure_kwargs()["signal_point"] == "pre_fx"
+
+    track["devices"] = [
+        {"id": 301, "name": "Serum"},
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+    ]
+    reader.device_types[301] = 1
+    post_instrument = resolve_session_taps(
+        reader,
+        reader.summary,
+        [CaptureSessionTap(2, "BASS_INST", "BASS", "post_instrument")],
+    )[0]
+    assert post_instrument.signal_point == "post_instrument"
+    assert post_instrument.device_index == 1
+
+
+def test_resolve_session_taps_refuses_signal_point_mismatch_before_capture():
+    reader = FakeReadClient()
+    reader.summary["tracks"][0]["devices"] = [
+        {"id": 202, "name": "Compressor"},
+        {"id": 201, "name": "ChibiTap"},
+    ]
+    reader.device_types[202] = 2
+
+    with pytest.raises(CaptureError, match="signal-point mismatch"):
+        resolve_session_taps(
+            reader,
+            reader.summary,
+            [CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx")],
         )
 
 
@@ -214,7 +288,11 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["live_session"]["set_signature"] == "sig-1"
-    assert [item["tap_id"] for item in manifest["live_session"]["tap_mapping"]] == [1, 2]
+    tap_mapping = manifest["live_session"]["tap_mapping"]
+    assert [item["tap_id"] for item in tap_mapping] == [1, 2]
+    assert [item["signal_point"] for item in tap_mapping] == ["post_fx", "post_fx"]
+    assert [item["device_index"] for item in tap_mapping] == [0, 0]
+    assert [item["arm_verification"]["device_index"] for item in tap_mapping] == [0, 0]
     assert manifest["live_session"]["song"]["file_path"] == "C:/test/Test Set.als"
     mixer_state = manifest["live_session"]["mixer_state"]
     assert [item["name"] for item in mixer_state["active_solos"]] == ["52-Serum 2"]
@@ -222,6 +300,7 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     assert mixer_state["tap_targets"][0]["solo_suppression_risk"] is False
     assert mixer_state["tap_targets"][1]["solo_suppression_risk"] is True
     assert [item["track_name"] for item in mixer_state["tap_targets"]] == ["Main", "BASS"]
+    assert [item["signal_point"] for item in mixer_state["tap_targets"]] == ["post_fx", "post_fx"]
     assert mixer_state["tap_targets"][1]["mute"] is False
     assert mixer_state["tap_targets"][1]["solo"] is False
     assert any("active solo" in warning.lower() for warning in mixer_state["warnings"])
@@ -234,5 +313,6 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     configure_calls = [call[1] for call in client.calls if call[0] == "configure"]
     assert [call["capture_enabled"] for call in configure_calls] == [True, True, False, False]
     assert all(call["expected_set_signature"] == "sig-1" for call in configure_calls)
+    assert all(call["signal_point"] == "post_fx" for call in configure_calls)
     transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
     assert transport_actions == ["stop", "play_until", "status"]
