@@ -172,6 +172,7 @@ def run_capture_session(
     poll_interval: float = 0.05,
     settle_seconds: float = 0.6,
     timeout_margin: float = 8.0,
+    expected_set_signature: str | None = None,
 ) -> Path:
     if poll_interval <= 0:
         raise CaptureError("poll_interval must be > 0")
@@ -190,6 +191,10 @@ def run_capture_session(
     set_signature = str(summary.get("set_signature") or "")
     if not set_signature:
         raise CaptureError("Live summary did not contain a Set signature")
+    if expected_set_signature is not None and set_signature != expected_set_signature:
+        raise CaptureError(
+            "Live Set changed since capture planning; refusing capture before any transport or ChibiTap effect"
+        )
     tempo = float(summary.get("tempo") or 0.0)
     target_samples = samples_for_beat_range(start_beat, end_beat, tempo, 48000)
     expected_seconds = target_samples / 48000.0
