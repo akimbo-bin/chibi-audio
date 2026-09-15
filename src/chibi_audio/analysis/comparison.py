@@ -75,6 +75,14 @@ def _semantic_by_query(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _top_candidate_label(value: dict[str, Any]) -> str | None:
+    candidate = value.get("top_candidate")
+    if not isinstance(candidate, dict):
+        return None
+    label = candidate.get("label")
+    return label if isinstance(label, str) and label else None
+
+
 def compare_reports(
     left: AnalysisReport,
     right: AnalysisReport,
@@ -217,6 +225,21 @@ def compare_reports(
                 "tempo_bpm_evidence_delta": _delta(a, b, "tempo_bpm_evidence"),
             }
 
+    beats_key = AnalysisCapability.MIR_BEATS.value
+    if beats_key in common:
+        a = left.measurements[beats_key]
+        b = right.measurements[beats_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[beats_key] = {
+                "beat_count_delta": _delta(a, b, "beat_count"),
+                "beat_density_per_second_delta": _delta(a, b, "beat_density_per_second"),
+                "tempo_bpm_evidence_delta": _delta(a, b, "tempo_bpm_evidence"),
+                "beat_interval_median_seconds_delta": _delta(a, b, "beat_interval_median_seconds"),
+                "beat_interval_coefficient_of_variation_delta": _delta(
+                    a, b, "beat_interval_coefficient_of_variation"
+                ),
+            }
+
     tonal_key = AnalysisCapability.MIR_TONAL.value
     if tonal_key in common:
         a = left.measurements[tonal_key]
@@ -227,6 +250,19 @@ def compare_reports(
                 "left_dominant_pitch_class_evidence": a.get("dominant_pitch_class_evidence"),
                 "right_dominant_pitch_class_evidence": b.get("dominant_pitch_class_evidence"),
                 "tonal_concentration_delta": _delta(a, b, "tonal_concentration"),
+            }
+
+    key_key = AnalysisCapability.MIR_KEY.value
+    if key_key in common:
+        a = left.measurements[key_key]
+        b = right.measurements[key_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[key_key] = {
+                "chroma_cosine_similarity": _mapping_cosine(a.get("chroma_profile"), b.get("chroma_profile")),
+                "left_top_candidate": _top_candidate_label(a),
+                "right_top_candidate": _top_candidate_label(b),
+                "candidate_margin_to_second_delta": _delta(a, b, "candidate_margin_to_second"),
+                "interpretation_note": "key candidates are signal-derived rankings; matching labels do not establish authoritative project key",
             }
 
     structure_key = AnalysisCapability.MIR_STRUCTURE.value

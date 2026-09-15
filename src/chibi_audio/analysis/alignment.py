@@ -16,6 +16,7 @@ class CaptureEventAlignmentError(ValueError):
 _SUPPORTED = frozenset(
     {
         AnalysisCapability.MIR_ONSETS,
+        AnalysisCapability.MIR_BEATS,
         AnalysisCapability.MIR_STRUCTURE,
         AnalysisCapability.TRANSIENTS,
         AnalysisCapability.MIR_TRANSCRIPTION,
@@ -48,6 +49,15 @@ def _extract_events(
             raise CaptureEventAlignmentError(f"tap {tap_id} has no onset_times_seconds list")
         return [
             (_event_time(value, tap_id=tap_id, capability=capability), {"event_kind": "onset"})
+            for value in values
+        ], False
+
+    if capability is AnalysisCapability.MIR_BEATS:
+        values = measurement.get("beat_times_seconds")
+        if not isinstance(values, list):
+            raise CaptureEventAlignmentError(f"tap {tap_id} has no beat_times_seconds list")
+        return [
+            (_event_time(value, tap_id=tap_id, capability=capability), {"event_kind": "beat"})
             for value in values
         ], False
 
