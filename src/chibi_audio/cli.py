@@ -5,6 +5,7 @@ import json
 
 from .als import dumps_report, inspect_set
 from .audio import analyze_audio
+from .harshness import analyze_harshness
 from .library import places_dict, read_user_places
 from .live import LiveBridgeClient
 from .plugins import catalog_dict, discover_plugins
@@ -37,6 +38,13 @@ def main() -> None:
     audio.add_argument("path")
     audio.add_argument("--window-seconds", type=float, default=12.0)
 
+    harshness = sub.add_parser(
+        "analyze-harshness",
+        help="Rank time-localized bright/attack-heavy events in a local audio file",
+    )
+    harshness.add_argument("path")
+    harshness.add_argument("--top-events", type=int, default=12)
+
     args = parser.parse_args()
     if args.command == "inspect-set":
         print(dumps_report(inspect_set(args.path)))
@@ -52,6 +60,8 @@ def main() -> None:
         print(json.dumps(client.set_summary(track_limit=args.track_limit, device_limit=args.device_limit), indent=2, ensure_ascii=False))
     elif args.command == "analyze-audio":
         print(json.dumps(analyze_audio(args.path, window_seconds=args.window_seconds), indent=2, ensure_ascii=False))
+    elif args.command == "analyze-harshness":
+        print(json.dumps(analyze_harshness(args.path, top_events=args.top_events), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
