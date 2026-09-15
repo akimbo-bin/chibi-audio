@@ -79,8 +79,8 @@ def test_signal_capabilities_share_one_analyzer() -> None:
 def test_time_range_limits_analysis_and_reports_absolute_activity(tmp_path: Path) -> None:
     _require_ffmpeg()
     source = tmp_path / "range.wav"
-    sample_rate = 1000
-    frames = [(0.0, 0.0)] * 1000 + [(0.5, 0.5)] * 1000 + [(0.0, 0.0)] * 1000
+    sample_rate = 8000
+    frames = [(0.0, 0.0)] * sample_rate + [(0.5, 0.5)] * sample_rate + [(0.0, 0.0)] * sample_rate
     _write_pcm16(source, frames, sample_rate)
     request = AnalysisRequest(
         capabilities=frozenset({AnalysisCapability.LEVELS, AnalysisCapability.ACTIVITY}),
@@ -95,7 +95,7 @@ def test_time_range_limits_analysis_and_reports_absolute_activity(tmp_path: Path
 
     assert levels["range"]["duration_seconds"] == pytest.approx(2.0, abs=0.002)
     assert activity["first_active_seconds"] == pytest.approx(1.0, abs=0.002)
-    assert activity["last_active_seconds"] == pytest.approx(1.999, abs=0.003)
+    assert activity["last_active_seconds"] == pytest.approx(1.999875, abs=0.001)
     assert activity["active_frame_fraction"] == pytest.approx(0.5, abs=0.002)
 
 
