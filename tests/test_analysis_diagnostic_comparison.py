@@ -1,3 +1,5 @@
+import pytest
+
 from chibi_audio.analysis import AnalysisReport, compare_reports
 
 
@@ -81,19 +83,19 @@ def test_compare_reports_includes_continuity_and_integrity_deltas() -> None:
     assert result["direction"] == "right_minus_left"
 
     stereo = result["comparisons"]["audio.stereo.timeline"]
-    assert stereo["correlation_median_delta"] == -0.3
-    assert stereo["side_energy_fraction_median_delta"] == 0.1
-    assert stereo["widest_sampled_side_energy_fraction_delta"] == 0.25
-    assert stereo["most_negative_correlation_delta"] == -0.4
+    assert stereo["correlation_median_delta"] == pytest.approx(-0.3)
+    assert stereo["side_energy_fraction_median_delta"] == pytest.approx(0.1)
+    assert stereo["widest_sampled_side_energy_fraction_delta"] == pytest.approx(0.25)
+    assert stereo["most_negative_correlation_delta"] == pytest.approx(-0.4)
 
     seam = result["comparisons"]["audio.loop.seam"]
-    assert seam["max_abs_endpoint_jump_delta"] == 0.019999999999999997
-    assert seam["max_abs_derivative_discontinuity_delta"] == 0.060000000000000005
-    assert seam["head_tail_waveform_correlation_delta"] == -0.30000000000000004
+    assert seam["max_abs_endpoint_jump_delta"] == pytest.approx(0.02)
+    assert seam["max_abs_derivative_discontinuity_delta"] == pytest.approx(0.06)
+    assert seam["head_tail_waveform_correlation_delta"] == pytest.approx(-0.3)
 
     integrity = result["comparisons"]["audio.integrity"]
-    assert integrity["max_abs_dc_offset_delta"] == 0.01
-    assert integrity["near_full_scale_frame_count_delta"] == 3.0
-    assert integrity["sustained_silence_run_count_delta"] == 2.0
-    assert integrity["longest_sustained_silence_seconds_delta"] == 0.19999999999999998
-    assert integrity["discontinuity_candidate_count_delta"] == 2.0
+    assert integrity["max_abs_dc_offset_delta"] == pytest.approx(0.01)
+    assert integrity["near_full_scale_frame_count_delta"] == pytest.approx(3.0)
+    assert integrity["sustained_silence_run_count_delta"] == pytest.approx(2.0)
+    assert integrity["longest_sustained_silence_seconds_delta"] == pytest.approx(0.2)
+    assert integrity["discontinuity_candidate_count_delta"] == pytest.approx(2.0)
