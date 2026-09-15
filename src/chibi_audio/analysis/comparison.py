@@ -150,6 +150,64 @@ def compare_reports(
                 "band_energy_fraction_delta": band_deltas,
             }
 
+    spectral_timeline_key = AnalysisCapability.SPECTRAL_TIMELINE.value
+    if spectral_timeline_key in common:
+        a = left.measurements[spectral_timeline_key]
+        b = right.measurements[spectral_timeline_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            first_bands = a.get("bands")
+            second_bands = b.get("bands")
+            band_deltas: dict[str, dict[str, float | None]] = {}
+            if isinstance(first_bands, dict) and isinstance(second_bands, dict):
+                for name in sorted(set(first_bands) & set(second_bands)):
+                    first = first_bands.get(name)
+                    second = second_bands.get(name)
+                    if not isinstance(first, dict) or not isinstance(second, dict):
+                        continue
+                    band_deltas[name] = {
+                        "median_fraction_delta": _delta(first, second, "median_fraction"),
+                        "p90_minus_p10_fraction_delta": _delta(
+                            first, second, "p90_minus_p10_fraction"
+                        ),
+                    }
+            comparisons[spectral_timeline_key] = {
+                "spectral_centroid_median_hz_delta": _nested_delta(
+                    a, b, "spectral_centroid", "median_hz"
+                ),
+                "spectral_centroid_p90_minus_p10_hz_delta": _nested_delta(
+                    a, b, "spectral_centroid", "p90_minus_p10_hz"
+                ),
+                "band_summary_delta": band_deltas,
+                "largest_sampled_spectral_shift_distance_delta": _nested_delta(
+                    a,
+                    b,
+                    "largest_sampled_spectral_shift",
+                    "band_fraction_euclidean_distance",
+                ),
+            }
+
+    dynamics_key = AnalysisCapability.DYNAMICS.value
+    if dynamics_key in common:
+        a = left.measurements[dynamics_key]
+        b = right.measurements[dynamics_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[dynamics_key] = {
+                "active_window_fraction_delta": _delta(a, b, "active_window_fraction"),
+                "active_rms_median_dbfs_delta": _delta(a, b, "active_rms_median_dbfs"),
+                "macro_dynamic_p90_to_p10_db_delta": _delta(
+                    a, b, "macro_dynamic_p90_to_p10_db"
+                ),
+                "second_minus_first_half_db_delta": _delta(
+                    a, b, "second_minus_first_half_db"
+                ),
+                "loudest_window_rms_dbfs_delta": _nested_delta(
+                    a, b, "loudest_window", "rms_dbfs"
+                ),
+                "largest_adjacent_rms_change_db_delta": _nested_delta(
+                    a, b, "largest_adjacent_rms_change", "rms_change_db"
+                ),
+            }
+
     transients_key = AnalysisCapability.TRANSIENTS.value
     if transients_key in common:
         a = left.measurements[transients_key]
