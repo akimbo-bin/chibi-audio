@@ -19,7 +19,7 @@ READ_ONLY_METHODS = frozenset(
         "browser_search",
     }
 )
-CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh"})
+CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh", "chibitap_remove"})
 BOUNDED_WRITE_METHODS = frozenset({"parameter_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
@@ -194,6 +194,7 @@ class LiveCaptureClient(_LiveTransport):
         self,
         *,
         placement: str = "master",
+        signal_point: str = "post_fx",
         track_index: int | None = None,
         expected_track_name: str | None = None,
         expected_set_signature: str | None = None,
@@ -201,11 +202,13 @@ class LiveCaptureClient(_LiveTransport):
     ) -> dict[str, Any]:
         if placement not in {"master", "track"}:
             raise LiveBridgeError("placement must be master or track")
+        if signal_point not in {"post_fx", "pre_fx", "post_instrument"}:
+            raise LiveBridgeError("signal_point must be post_fx, pre_fx, or post_instrument")
         if placement == "track" and (track_index is None or not expected_track_name):
             raise LiveBridgeError("track placement requires track_index and expected_track_name")
         if verify_capability:
             self._require_method("capture", "chibitap_setup")
-        params: dict[str, Any] = {"placement": placement}
+        params: dict[str, Any] = {"placement": placement, "signal_point": signal_point}
         if track_index is not None:
             params["track_index"] = int(track_index)
         if expected_track_name is not None:
@@ -219,6 +222,7 @@ class LiveCaptureClient(_LiveTransport):
         *,
         expected_device_id: int,
         placement: str = "master",
+        signal_point: str = "post_fx",
         track_index: int | None = None,
         expected_track_name: str | None = None,
         tap_id: int | None = None,
@@ -230,6 +234,8 @@ class LiveCaptureClient(_LiveTransport):
     ) -> dict[str, Any]:
         if placement not in {"master", "track"}:
             raise LiveBridgeError("placement must be master or track")
+        if signal_point not in {"post_fx", "pre_fx", "post_instrument"}:
+            raise LiveBridgeError("signal_point must be post_fx, pre_fx, or post_instrument")
         if placement == "track" and (track_index is None or not expected_track_name):
             raise LiveBridgeError("track placement requires track_index and expected_track_name")
         if tap_id is None and capture_enabled is None:
@@ -240,7 +246,7 @@ class LiveCaptureClient(_LiveTransport):
             raise LiveBridgeError("expected_capture_enabled is required when changing capture_enabled")
         if verify_capability:
             self._require_method("capture", "chibitap_configure")
-        params: dict[str, Any] = {"placement": placement, "expected_device_id": int(expected_device_id)}
+        params: dict[str, Any] = {"placement": placement, "signal_point": signal_point, "expected_device_id": int(expected_device_id)}
         if track_index is not None:
             params["track_index"] = int(track_index)
         if expected_track_name is not None:
@@ -257,6 +263,42 @@ class LiveCaptureClient(_LiveTransport):
             params["expected_set_signature"] = expected_set_signature
         return self._request("chibitap_configure", params)
 
+
+    def remove_chibitap(
+        self,
+        *,
+        expected_device_id: int,
+        placement: str = "master",
+        signal_point: str = "post_fx",
+        track_index: int | None = None,
+        expected_track_name: str | None = None,
+        expected_capture_enabled: bool = False,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if placement not in {"master", "track"}:
+            raise LiveBridgeError("placement must be master or track")
+        if signal_point not in {"post_fx", "pre_fx", "post_instrument"}:
+            raise LiveBridgeError("signal_point must be post_fx, pre_fx, or post_instrument")
+        if placement == "track" and (track_index is None or not expected_track_name):
+            raise LiveBridgeError("track placement requires track_index and expected_track_name")
+        if expected_capture_enabled is not False:
+            raise LiveBridgeError("remove_chibitap requires expected_capture_enabled=False")
+        if verify_capability:
+            self._require_method("capture", "chibitap_remove")
+        params: dict[str, Any] = {
+            "placement": placement,
+            "signal_point": signal_point,
+            "expected_device_id": int(expected_device_id),
+            "expected_capture_enabled": False,
+        }
+        if track_index is not None:
+            params["track_index"] = int(track_index)
+        if expected_track_name is not None:
+            params["expected_track_name"] = expected_track_name
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("chibitap_remove", params)
 
     def set_chibitap_capture(
         self,

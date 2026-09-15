@@ -155,6 +155,7 @@ def test_chibitap_setup_targets_exact_track_identity():
     assert result["method"] == "chibitap_setup"
     assert client.calls[-1][1] == {
         "placement": "track",
+        "signal_point": "post_fx",
         "track_index": 34,
         "expected_track_name": "BASS",
         "expected_set_signature": "sig-setup",
@@ -178,6 +179,7 @@ def test_chibitap_configure_guards_tap_id_and_capture():
     assert result["method"] == "chibitap_configure"
     assert client.calls[-1][1] == {
         "placement": "track",
+        "signal_point": "post_fx",
         "expected_device_id": 9876,
         "track_index": 53,
         "expected_track_name": "DRUMS",
@@ -205,3 +207,30 @@ def test_chibitap_refresh_is_explicit_and_guarded():
         "expected_capture_value": 0.0,
         "expected_set_signature": "sig-refresh",
     }
+
+
+def test_chibitap_signal_point_validation_and_remove():
+    client = FakeCaptureClient()
+    with pytest.raises(LiveBridgeError, match="signal_point"):
+        client.setup_chibitap(signal_point="middle")
+    result = client.remove_chibitap(
+        placement="track",
+        signal_point="pre_fx",
+        track_index=23,
+        expected_track_name="24-Audio",
+        expected_device_id=4321,
+        expected_capture_enabled=False,
+        expected_set_signature="sig-remove",
+    )
+    assert result["method"] == "chibitap_remove"
+    assert client.calls[-1][1] == {
+        "placement": "track",
+        "signal_point": "pre_fx",
+        "expected_device_id": 4321,
+        "expected_capture_enabled": False,
+        "track_index": 23,
+        "expected_track_name": "24-Audio",
+        "expected_set_signature": "sig-remove",
+    }
+    with pytest.raises(LiveBridgeError, match="expected_capture_enabled=False"):
+        client.remove_chibitap(expected_device_id=1, expected_capture_enabled=True)
