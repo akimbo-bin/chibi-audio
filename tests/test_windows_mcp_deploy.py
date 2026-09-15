@@ -3,6 +3,7 @@ from pathlib import Path
 
 RUNNER = Path("deploy/windows/run-chibi-audio-mcp.ps1")
 BOOTSTRAP = Path("deploy/windows/bootstrap-chibi-audio-mcp.ps1")
+TUNNEL_INSTALLER = Path("deploy/windows/install-openai-tunnel-client.ps1")
 RUNBOOK = Path("deploy/CHATGPT_AUDIO_MCP.md")
 
 
@@ -32,6 +33,25 @@ def test_bootstrap_only_prepares_dedicated_python_environment():
     assert "analysis,mcp" in source
     assert "chibi_audio.mcp_server" not in source
     assert "127.0.0.1:18765" not in source
+
+
+def test_tunnel_installer_is_pinned_and_verifies_published_digest():
+    source = TUNNEL_INSTALLER.read_text(encoding="utf-8")
+    assert "$version = 'v0.0.14'" in source
+    assert "tunnel-client-$version-windows-amd64.zip" in source
+    assert "784ab8da7b5a88f0109f1fd8aaf0a1c86067430b896dddf307ef7e3cc49fa1a5" in source
+    assert "Get-FileHash -Algorithm SHA256" in source
+    assert "Invoke-WebRequest" in source
+    assert "tunnel-client.exe" in source
+
+
+def test_tunnel_installer_does_not_create_profile_or_persist_service():
+    source = TUNNEL_INSTALLER.read_text(encoding="utf-8").lower()
+    assert "tunnel-client init" not in source
+    assert "tunnel-client run" not in source
+    assert "runtime api key" in source
+    assert "new-service" not in source
+    assert "register-scheduledtask" not in source
 
 
 def test_tunnel_runbook_keeps_live_loopback_and_tunnel_outbound():
