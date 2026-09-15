@@ -223,11 +223,16 @@ def test_resolve_session_taps_rechecks_transient_stale_capture_state(monkeypatch
     assert reader.main_capture_reads == 2
 
 
-def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp_path):
+def test_run_capture_session_coordinates_signal_points_and_records_provenance(monkeypatch, tmp_path):
     import chibi_audio.capture_session as session
 
     FakeCaptureClient.instances.clear()
     reader = FakeReadClient()
+    reader.summary["tracks"][0]["devices"] = [
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+    ]
+    reader.device_types[202] = 2
     reader.summary["tracks"][0]["mute"] = False
     reader.summary["tracks"][0]["solo"] = False
     reader.summary["tracks"].append(
@@ -275,7 +280,10 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
 
     manifest_path = run_capture_session(
         experiment_id="proof",
-        taps=[CaptureSessionTap(1, "Main", "master"), CaptureSessionTap(2, "BASS", "BASS")],
+        taps=[
+            CaptureSessionTap(1, "Main", "master"),
+            CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx"),
+        ],
         output_dir=tmp_path / "final",
         start_beat=0.0,
         end_beat=1.0,
@@ -290,9 +298,10 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     assert manifest["live_session"]["set_signature"] == "sig-1"
     tap_mapping = manifest["live_session"]["tap_mapping"]
     assert [item["tap_id"] for item in tap_mapping] == [1, 2]
-    assert [item["signal_point"] for item in tap_mapping] == ["post_fx", "post_fx"]
+    assert [item["signal_point"] for item in tap_mapping] == ["post_fx", "pre_fx"]
     assert [item["device_index"] for item in tap_mapping] == [0, 0]
     assert [item["arm_verification"]["device_index"] for item in tap_mapping] == [0, 0]
+    assert [item["arm_verification"]["signal_point"] for item in tap_mapping] == ["post_fx", "pre_fx"]
     assert manifest["live_session"]["song"]["file_path"] == "C:/test/Test Set.als"
     mixer_state = manifest["live_session"]["mixer_state"]
     assert [item["name"] for item in mixer_state["active_solos"]] == ["52-Serum 2"]
@@ -300,7 +309,7 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     assert mixer_state["tap_targets"][0]["solo_suppression_risk"] is False
     assert mixer_state["tap_targets"][1]["solo_suppression_risk"] is True
     assert [item["track_name"] for item in mixer_state["tap_targets"]] == ["Main", "BASS"]
-    assert [item["signal_point"] for item in mixer_state["tap_targets"]] == ["post_fx", "post_fx"]
+    assert [item["signal_point"] for item in mixer_state["tap_targets"]] == ["post_fx", "pre_fx"]
     assert mixer_state["tap_targets"][1]["mute"] is False
     assert mixer_state["tap_targets"][1]["solo"] is False
     assert any("active solo" in warning.lower() for warning in mixer_state["warnings"])
@@ -313,6 +322,11 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     configure_calls = [call[1] for call in client.calls if call[0] == "configure"]
     assert [call["capture_enabled"] for call in configure_calls] == [True, True, False, False]
     assert all(call["expected_set_signature"] == "sig-1" for call in configure_calls)
-    assert all(call["signal_point"] == "post_fx" for call in configure_calls)
+    assert [call["signal_point"] for call in configure_calls] == [
+        "post_fx",
+        "pre_fx",
+        "pre_fx",
+        "post_fx",
+    ]
     transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
     assert transport_actions == ["stop", "play_until", "status"]
