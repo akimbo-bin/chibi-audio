@@ -41,6 +41,19 @@ Stereo spectrum is calculated by averaging channel power after FFT. It does not 
 
 The decode context is lazy and shared. A metadata-only request never decodes audio; multiple selected core analyzers reuse the same bounded decoded segment.
 
+## Comparison without more DSP
+
+`compare_reports(left, right, ...)` operates only on already-computed reports. It never reopens audio. This gives Chibi a cheap second-stage primitive for:
+
+- build -> drop contrast;
+- pre -> post processing A/B evidence;
+- mix -> reference evidence;
+- one captured tap -> another captured tap when the comparison is meaningful.
+
+The comparison surface emits explicit `right - left` deltas for common level, activity, stereo, spectrum, loudness and onset measurements. Tonal reports receive chroma cosine similarity plus the two dominant pitch-class evidence values. Missing/non-common capabilities stay absent rather than being guessed.
+
+A comparison never decides which side is better. Level matching and musical interpretation remain separate responsibilities.
+
 ## Evidence semantics
 
 The core intentionally separates observations from subjective conclusions:
@@ -80,7 +93,7 @@ No large model is required.
 
 1. short-term/momentary loudness and section-envelope summaries on top of the current integrated loudness evidence;
 2. section/change novelty evidence using librosa primitives;
-3. reference comparison using identical capability/range requests against target and reference artifacts;
+3. level-matched reference comparison orchestration around the existing report-comparison primitive;
 4. event-aligned cross-track evidence over finalized multi-tap capture manifests;
 5. optional Demucs-backed reference decomposition behind EXPENSIVE cost and explicit request.
 
@@ -92,6 +105,7 @@ The MCP/control lane should eventually need only a thin call resembling:
 list_audio_analyzers()
 analyze_audio(artifact_ref, capabilities, max_cost, start_seconds?, end_seconds?)
 analyze_capture_manifest(manifest_ref, capabilities, tap_ids?, max_cost)
+compare_analysis_reports(left_report_ref, right_report_ref)
 ```
 
 It should not expose analyzer implementation details as workflow authority. Chibi/Core/ChatGPT decides what evidence is needed; this package computes the requested evidence and returns provenance.
