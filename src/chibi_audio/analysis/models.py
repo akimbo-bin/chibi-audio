@@ -61,6 +61,7 @@ class AnalysisRequest:
             "capabilities",
             frozenset(AnalysisCapability(value) for value in self.capabilities),
         )
+        object.__setattr__(self, "max_cost", AnalysisCost(self.max_cost))
         if not self.capabilities:
             raise ValueError("at least one analysis capability is required")
         if self.start_seconds is not None and self.start_seconds < 0:
