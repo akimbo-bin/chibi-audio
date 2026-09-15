@@ -5,7 +5,9 @@ import pytest
 from chibi_audio.analysis import (
     CaptureSpectralOverlapError,
     SPECTRAL_OVERLAP_SCHEMA_VERSION,
+    SPECTRAL_OVERLAP_TIMELINE_SCHEMA_VERSION,
     compare_capture_spectral_overlap,
+    compare_capture_spectral_overlap_timeline,
 )
 
 
@@ -25,6 +27,27 @@ def _tap(
         "tap_id": tap_id,
         "source_label": label,
         "analysis": {"measurements": measurements},
+    }
+
+
+def _timeline_tap(
+    tap_id: int,
+    label: str,
+    rows: list[tuple[float, dict[str, float]]],
+) -> dict[str, object]:
+    return {
+        "tap_id": tap_id,
+        "source_label": label,
+        "analysis": {
+            "measurements": {
+                "audio.spectrum.timeline": {
+                    "timeline": [
+                        {"time_seconds": time_seconds, "band_energy_fraction": bands}
+                        for time_seconds, bands in rows
+                    ]
+                }
+            }
+        },
     }
 
 
@@ -94,3 +117,103 @@ def test_capture_spectral_overlap_validates_schema_pair_count_and_bounds() -> No
             _capture(_tap(1, "one", {"bass": 1.0}), _tap(2, "two", {"bass": 1.0})),
             dominant_band_limit=0,
         )
+
+
+def test_timeline_overlap_localizes_strongest_shared_band_moments() -> None:
+    capture = _capture(
+        _timeline_tap(
+            1,
+            "bass",
+            [
+                (1.00, {"low": 0.90, "mid": 0.10, "high": 0.0}),
+                (2.00, {"low": 0.20, "mid": 0.80, "high": 0.0}),
+                (3.00, {"low": 0.10, "mid": 0.10, "high": 0.80}),
+            ],
+        ),
+        _timeline_tap(
+            2,
+            "synth",
+            [
+                (1.02, {"low": 0.80, "mid": 0.20, "high": 0.0}),
+                (2.01, {"low": 0.10, "mid": 0.90, "high": 0.0}),
+                (3.04, {"low": 0.70, "mid": 0.20, "high": 0.10}),
+            ],
+        ),
+    )
+
+    result = compare_capture_spectral_overlap_timeline(
+        capture,
+        time_tolerance_seconds=0.05,
+        max_moments_per_pair=2,
+    )
+
+    assert result["schema_version"] == SPECTRAL_OVERLAP_TIMELINE_SCHEMA_VERSION
+    pair = result["pairs"][0]
+    assert pair["matched_window_count"] == 3
+    assert pair["unmatched_left_window_count"] == 0
+    assert pair["unmatched_right_window_count"] == 0
+    assert pair["overlap_coefficient"]["median"] == pytest.approx(0.90)
+    assert len(pair["strongest_overlap_moments"]) == 2
+    strongest = pair["strongest_overlap_moments"][0]
+    assert strongest["spectral_overlap_coefficient"] == pytest.approx(0.90)
+    assert strongest["dominant_overlapping_bands"][0]["band"] in {"low", "mid"}
+    assert abs(strongest["right_minus_left_time_seconds"]) <= 0.05
+    assert "not proof" in result["interpretation_note"]
+
+
+def test_timeline_overlap_matching_is_one_to_one_and_never_reuses_a_window() -> None:
+    capture = _capture(
+        _timeline_tap(
+            1,
+            "left",
+            [
+                (1.00, {"low": 1.0}),
+                (1.04, {"low": 1.0}),
+            ],
+        ),
+        _timeline_tap(2, "right", [(1.02, {"low": 1.0})]),
+    )
+
+    pair = compare_capture_spectral_overlap_timeline(
+        capture,
+        time_tolerance_seconds=0.03,
+    )["pairs"][0]
+
+    assert pair["matched_window_count"] == 1
+    assert pair["unmatched_left_window_count"] == 1
+    assert pair["unmatched_right_window_count"] == 0
+    assert len(pair["strongest_overlap_moments"]) == 1
+
+
+def test_timeline_overlap_reports_unmatched_windows_when_sampling_times_do_not_align() -> None:
+    capture = _capture(
+        _timeline_tap(1, "left", [(1.0, {"low": 1.0}), (2.0, {"low": 1.0})]),
+        _timeline_tap(2, "right", [(1.2, {"low": 1.0}), (2.2, {"low": 1.0})]),
+    )
+
+    pair = compare_capture_spectral_overlap_timeline(
+        capture,
+        time_tolerance_seconds=0.05,
+    )["pairs"][0]
+
+    assert pair["matched_window_count"] == 0
+    assert pair["overlap_coefficient"] == {"p10": None, "median": None, "p90": None}
+    assert pair["strongest_overlap_moments"] == []
+
+
+def test_timeline_overlap_fails_closed_on_unsorted_rows_and_bad_bounds() -> None:
+    unsorted = _capture(
+        _timeline_tap(1, "one", [(2.0, {"low": 1.0}), (1.0, {"low": 1.0})]),
+        _timeline_tap(2, "two", [(1.0, {"low": 1.0})]),
+    )
+    with pytest.raises(CaptureSpectralOverlapError, match="time-sorted"):
+        compare_capture_spectral_overlap_timeline(unsorted)
+
+    valid = _capture(
+        _timeline_tap(1, "one", [(1.0, {"low": 1.0})]),
+        _timeline_tap(2, "two", [(1.0, {"low": 1.0})]),
+    )
+    with pytest.raises(CaptureSpectralOverlapError, match="between 0 and 5"):
+        compare_capture_spectral_overlap_timeline(valid, time_tolerance_seconds=6.0)
+    with pytest.raises(CaptureSpectralOverlapError, match="between 1 and 16"):
+        compare_capture_spectral_overlap_timeline(valid, max_moments_per_pair=0)

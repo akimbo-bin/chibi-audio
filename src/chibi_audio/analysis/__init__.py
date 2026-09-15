@@ -16,8 +16,10 @@ from .models import (
 )
 from .overlap import (
     SPECTRAL_OVERLAP_SCHEMA_VERSION,
+    SPECTRAL_OVERLAP_TIMELINE_SCHEMA_VERSION,
     CaptureSpectralOverlapError,
     compare_capture_spectral_overlap,
+    compare_capture_spectral_overlap_timeline,
 )
 from .service import AnalysisUnavailable, AnalyzerRegistry, AudioAnalysisService
 
@@ -27,6 +29,7 @@ __all__ = [
     "COMPARISON_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SPECTRAL_OVERLAP_SCHEMA_VERSION",
+    "SPECTRAL_OVERLAP_TIMELINE_SCHEMA_VERSION",
     "AnalysisCapability",
     "AnalysisCost",
     "AnalysisReport",
@@ -41,5 +44,6 @@ __all__ = [
     "align_capture_events",
     "analyze_capture_manifest",
     "compare_capture_spectral_overlap",
+    "compare_capture_spectral_overlap_timeline",
     "compare_reports",
 ]
