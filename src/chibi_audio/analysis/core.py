@@ -74,12 +74,15 @@ class SignalAnalyzer:
             peak = float(np.max(per_channel_peak))
             rms = float(np.sqrt(np.mean(audio * audio)))
             crest = _db(peak / rms) if peak > 0 and rms > 0 else None
+            sample_over_count = int(np.count_nonzero(absolute >= 1.0))
             result[AnalysisCapability.LEVELS.value] = {
                 "sample_peak": peak,
                 "sample_peak_dbfs": _db(peak),
                 "rms": rms,
                 "rms_dbfs": _db(rms),
                 "crest_factor_db": crest,
+                "sample_over_count": sample_over_count,
+                "sample_over_fraction": sample_over_count / float(audio.size),
                 "true_peak_dbtp": None,
                 "true_peak_status": "not_computed_by_signal_analyzer",
                 "per_channel": [
@@ -114,32 +117,45 @@ class SignalAnalyzer:
             }
 
         if AnalysisCapability.STEREO in requested:
-            left = audio[:, 0]
-            right = audio[:, 1]
-            left_std = float(np.std(left))
-            right_std = float(np.std(right))
-            correlation = (
-                float(np.corrcoef(left, right)[0, 1])
-                if left_std > 0.0 and right_std > 0.0
-                else None
-            )
-            mid = (left + right) * 0.5
-            side = (left - right) * 0.5
-            mid_energy = float(np.mean(mid * mid))
-            side_energy = float(np.mean(side * side))
-            total = mid_energy + side_energy
-            result[AnalysisCapability.STEREO.value] = {
-                "correlation": correlation,
-                "mid_rms": math.sqrt(mid_energy),
-                "side_rms": math.sqrt(side_energy),
-                "side_energy_fraction": side_energy / total if total > 0.0 else None,
-                "side_to_mid_db": (
-                    _db(math.sqrt(side_energy)) - _db(math.sqrt(mid_energy))
-                    if side_energy > 0.0 and mid_energy > 0.0
+            source_channels = int(context.probe["channels"])
+            if source_channels != 2:
+                result[AnalysisCapability.STEREO.value] = {
+                    "available": False,
+                    "source_channels": source_channels,
+                    "reason": "stereo correlation/M-S evidence requires an original two-channel source",
+                    "range": range_payload,
+                }
+            else:
+                left = audio[:, 0]
+                right = audio[:, 1]
+                left_std = float(np.std(left))
+                right_std = float(np.std(right))
+                correlation = (
+                    float(np.corrcoef(left, right)[0, 1])
+                    if left_std > 0.0 and right_std > 0.0
                     else None
-                ),
-                "range": range_payload,
-            }
+                )
+                mid = (left + right) * 0.5
+                side = (left - right) * 0.5
+                mid_energy = float(np.mean(mid * mid))
+                side_energy = float(np.mean(side * side))
+                total = mid_energy + side_energy
+                mid_rms = math.sqrt(mid_energy)
+                side_rms = math.sqrt(side_energy)
+                result[AnalysisCapability.STEREO.value] = {
+                    "available": True,
+                    "source_channels": source_channels,
+                    "correlation": correlation,
+                    "mid_rms": mid_rms,
+                    "side_rms": side_rms,
+                    "side_energy_fraction": side_energy / total if total > 0.0 else None,
+                    "side_to_mid_db": (
+                        20.0 * math.log10(side_rms / mid_rms)
+                        if side_rms > 0.0 and mid_rms > 0.0
+                        else None
+                    ),
+                    "range": range_payload,
+                }
 
         return result
 
