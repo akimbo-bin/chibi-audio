@@ -1,10 +1,29 @@
-﻿#include <JuceHeader.h>
+#include <JuceHeader.h>
 
 #include <cmath>
 #include <iostream>
 
 namespace
 {
+class TestPlayHead final : public juce::AudioPlayHead
+{
+public:
+    Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setIsPlaying(playing);
+        info.setTimeInSamples(samplePosition);
+        return info;
+    }
+
+    void setPlaying(bool value) noexcept { playing = value; }
+    void advance(int samples) noexcept { samplePosition += samples; }
+
+private:
+    bool playing = false;
+    int64_t samplePosition = 0;
+};
+
 juce::File captureRoot()
 {
     return juce::File::getSpecialLocation(juce::File::userHomeDirectory)
@@ -78,6 +97,9 @@ int main(int argc, char** argv)
     instance->setPlayConfigDetails(2, 2, 48000.0, 256);
     instance->prepareToPlay(48000.0, 256);
 
+    TestPlayHead playHead;
+    instance->setPlayHead(&playHead);
+
     juce::AudioBuffer<float> buffer(2, 256);
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
@@ -96,22 +118,28 @@ int main(int argc, char** argv)
     }
 
     juce::AudioProcessorParameter* capture = nullptr;
+    juce::AudioProcessorParameter* tapId = nullptr;
     for (auto* parameter : instance->getParameters())
-        if (parameter != nullptr && parameter->getName(128).equalsIgnoreCase("Capture"))
-        {
-            capture = parameter;
-            break;
-        }
-    if (capture == nullptr)
     {
-        std::cerr << "FAIL: hosted VST3 has no Capture parameter\n";
+        if (parameter == nullptr)
+            continue;
+        if (parameter->getName(128).equalsIgnoreCase("Capture"))
+            capture = parameter;
+        else if (parameter->getName(128).equalsIgnoreCase("Tap ID"))
+            tapId = parameter;
+    }
+    if (capture == nullptr || tapId == nullptr)
+    {
+        std::cerr << "FAIL: hosted VST3 is missing Capture or Tap ID parameter\n";
         return 5;
     }
 
+    tapId->setValueNotifyingHost(43.0f / 9999.0f);
     const auto started = juce::Time::getCurrentTime();
     capture->setValueNotifyingHost(1.0f);
     instance->processBlock(buffer, midi);
     juce::Thread::sleep(40);
+    playHead.setPlaying(true);
     for (int block = 0; block < 96; ++block)
     {
         for (int i = 0; i < buffer.getNumSamples(); ++i)
@@ -123,10 +151,12 @@ int main(int argc, char** argv)
         }
         instance->processBlock(buffer, midi);
     }
+    playHead.setPlaying(false);
     capture->setValueNotifyingHost(0.0f);
     instance->processBlock(buffer, midi);
     juce::Thread::sleep(150);
     instance->releaseResources();
+    instance->setPlayHead(nullptr);
     instance.reset();
     juce::Thread::sleep(50);
 
@@ -137,6 +167,12 @@ int main(int argc, char** argv)
         return 6;
     }
 
+    if (!wav.getFileName().contains("tap-43-"))
+    {
+        std::cerr << "FAIL: hosted VST3 Tap ID is missing from capture filename: " << wav.getFileName() << "\n";
+        return 7;
+    }
+
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(wav));
@@ -144,6 +180,14 @@ int main(int argc, char** argv)
     {
         std::cerr << "FAIL: hosted capture is not a readable float32 WAV\n";
         return 7;
+    }
+
+    const auto expectedSamples = static_cast<int64_t>(96 * 256);
+    if (reader->lengthInSamples != expectedSamples)
+    {
+        std::cerr << "FAIL: hosted transport gate wrote " << reader->lengthInSamples
+                  << " samples; expected exactly " << expectedSamples << "\n";
+        return 8;
     }
 
     const auto count = static_cast<int>(juce::jmin<int64>(reader->lengthInSamples, 4096));
@@ -167,7 +211,7 @@ int main(int argc, char** argv)
         return 9;
     }
 
-    std::cout << "PASS: VST3 wrapper scan, instantiate, transparent process, and float32 capture: "
+    std::cout << "PASS: VST3 wrapper scan, transport gate, Tap ID, transparent process, and float32 capture: "
               << wav.getFullPathName() << "\n";
     wav.deleteFile();
     return 0;

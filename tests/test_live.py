@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import pytest
 
@@ -220,3 +220,51 @@ def test_capture_transport_seek_and_guards():
         client.transport("continue")
     with pytest.raises(LiveBridgeError, match="time must be >= 0"):
         client.transport("status", time=-1)
+
+
+def test_chibitap_setup_targets_exact_track_identity():
+    assert "chibitap_setup" in CAPTURE_METHODS
+    client = FakeCaptureClient()
+    result = client.setup_chibitap(
+        placement="track",
+        track_index=34,
+        expected_track_name="BASS",
+        expected_set_signature="sig-setup",
+    )
+    assert result["method"] == "chibitap_setup"
+    assert client.calls[-1][1] == {
+        "placement": "track",
+        "track_index": 34,
+        "expected_track_name": "BASS",
+        "expected_set_signature": "sig-setup",
+    }
+
+
+def test_chibitap_configure_guards_tap_id_and_capture():
+    assert "chibitap_configure" in CAPTURE_METHODS
+    client = FakeCaptureClient()
+    result = client.configure_chibitap(
+        placement="track",
+        track_index=53,
+        expected_track_name="DRUMS",
+        expected_device_id=9876,
+        tap_id=3,
+        expected_tap_id=0,
+        capture_enabled=True,
+        expected_capture_enabled=False,
+        expected_set_signature="sig-config",
+    )
+    assert result["method"] == "chibitap_configure"
+    assert client.calls[-1][1] == {
+        "placement": "track",
+        "expected_device_id": 9876,
+        "track_index": 53,
+        "expected_track_name": "DRUMS",
+        "tap_id": 3,
+        "expected_tap_id": 0,
+        "capture_enabled": True,
+        "expected_capture_enabled": False,
+        "expected_set_signature": "sig-config",
+    }
+    with pytest.raises(LiveBridgeError, match="expected_tap_id"):
+        client.configure_chibitap(expected_device_id=1, tap_id=1)

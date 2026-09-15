@@ -29,7 +29,7 @@ if (Test-Path -LiteralPath (Join-Path $localJuce "CMakeLists.txt")) {
 & $cmake @configure
 if ($LASTEXITCODE -ne 0) { throw "ChibiTap configure failed with exit code $LASTEXITCODE" }
 
-$targets = @("ChibiTap", "ChibiTapCoreTests", "ChibiTapVst3SmokeTest")
+$targets = @("ChibiTap_VST3", "ChibiTapCoreTests", "ChibiTapVst3SmokeTest")
 & $cmake --build $build --config $Configuration --target @targets -- /m:1
 if ($LASTEXITCODE -ne 0) { throw "ChibiTap build failed with exit code $LASTEXITCODE" }
 

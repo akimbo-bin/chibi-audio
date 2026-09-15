@@ -28,7 +28,9 @@ Writes require freshly observed identity plus expected before-state and verify t
 Generic setters, arbitrary calls and arbitrary Python execution are not exposed. See [control-plane.md](control-plane.md) for the model-facing facade, reversible audition-plan and parameter snapshot/diff contract.
 ### Capture
 The primary capture surface is ChibiTap plus bounded transport:
-- `chibitap_capture(enabled, expected_current_value, expected_device_id, expected_set_signature)`;
+- `chibitap_setup(placement, exact track identity, expected_set_signature)`;
+- `chibitap_configure(placement, expected_device_id, expected Tap ID/Capture state, requested Tap ID/Capture state, expected_set_signature)`;
+- `chibitap_capture(...)` as the narrow Main-only compatibility toggle;
 - `capture_transport(status|seek|play|stop)`.
 
 `chibitap_capture` is intentionally not a generic plugin-parameter setter. It refuses to act unless the final Main device is exactly `ChibiTap`, the device identity matches when supplied, the observed `Capture` value matches `expected_current_value`, and any supplied Set signature still matches.
@@ -42,13 +44,13 @@ Capture authority does not imply arbitrary device insertion, soloing, routing ed
 3. Ensure trusted ChibiTap instances are already present at the desired signal points.
 4. Pre-arm the capture writer(s) without changing the audio path.
 5. Seek/play the requested musical range through typed transport control.
-6. Gate capture against the host timeline/range; until range gating lands, record lead/tail and trim only with explicit timing evidence.
+6. ChibiTap gates writes on host playback. Until requested end-boundary finality lands, allow a shared overrun only with explicit requested/actual timing evidence and deterministic post-crop.
 7. Stop transport and disarm capture.
 8. Wait until each WAV is stable on disk.
 9. Fingerprint each artifact with SHA-256 and verify format/sample rate/channel count plus non-zero/silence expectations.
 10. Analyze immutable captures and attach results to the experiment manifest.
 
-The single-Main ChibiTap path is already proven. The next coordinator must make steps 4-8 one typed, sample-aligned operation across multiple taps. Until then, the model must not substitute CUA for missing range/alignment semantics.
+The Main/BASS/DRUMS multi-tap path is now proven: Tap IDs map the artifacts to exact Live signal points and one playback pass produced equal sample counts across all three files. The next coordinator must make the requested **end boundary** deterministic rather than relying on transport polling. Until that lands, overrun must be explicit in timing evidence and the model must not substitute CUA for missing range-finality semantics.
 ## Effect certainty
 Mutations and capture control use the same certainty principle as Chibi Core:
 - `NOT_STARTED`: no command/effect was issued.

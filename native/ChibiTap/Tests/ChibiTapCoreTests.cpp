@@ -1,10 +1,29 @@
-﻿#include "../Source/PluginProcessor.h"
+#include "../Source/PluginProcessor.h"
 
 #include <cmath>
 #include <iostream>
 
 namespace
 {
+class TestPlayHead final : public juce::AudioPlayHead
+{
+public:
+    Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setIsPlaying(playing);
+        info.setTimeInSamples(samplePosition);
+        return info;
+    }
+
+    void setPlaying(bool value) noexcept { playing = value; }
+    void advance(int samples) noexcept { samplePosition += samples; }
+
+private:
+    bool playing = false;
+    int64_t samplePosition = 0;
+};
+
 bool buffersEqual(const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
 {
     if (a.getNumChannels() != b.getNumChannels() || a.getNumSamples() != b.getNumSamples())
@@ -25,6 +44,15 @@ juce::File captureRoot()
         .getChildFile("chibitap")
         .getChildFile("captures");
 }
+
+juce::AudioProcessorParameter* findParameter(juce::AudioProcessor& processor, const juce::String& name)
+{
+    for (auto* parameter : processor.getParameters())
+        if (parameter != nullptr && parameter->getName(128).equalsIgnoreCase(name))
+            return parameter;
+
+    return nullptr;
+}
 }
 
 int main()
@@ -32,10 +60,15 @@ int main()
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     constexpr double sampleRate = 48000.0;
     constexpr int blockSize = 256;
+    constexpr int playingBlocks = 64;
+    constexpr int tapIdValue = 42;
 
     ChibiTapAudioProcessor processor;
     processor.setPlayConfigDetails(2, 2, sampleRate, blockSize);
     processor.prepareToPlay(sampleRate, blockSize);
+
+    TestPlayHead playHead;
+    processor.setPlayHead(&playHead);
 
     juce::AudioBuffer<float> buffer(2, blockSize);
     for (int i = 0; i < blockSize; ++i)
@@ -57,19 +90,27 @@ int main()
         return 1;
     }
 
-    auto* capture = dynamic_cast<juce::AudioParameterBool*>(processor.getParameters()[0]);
-    if (capture == nullptr)
+    auto* capture = findParameter(processor, "Capture");
+    auto* tapId = dynamic_cast<juce::RangedAudioParameter*>(findParameter(processor, "Tap ID"));
+    if (capture == nullptr || tapId == nullptr)
     {
-        std::cerr << "FAIL: Capture parameter missing\n";
+        std::cerr << "FAIL: Capture or Tap ID parameter missing\n";
         return 2;
     }
 
+    tapId->setValueNotifyingHost(tapId->convertTo0to1(static_cast<float>(tapIdValue)));
     const auto startedAt = juce::Time::getCurrentTime();
     capture->setValueNotifyingHost(1.0f);
-    processor.processBlock(buffer, midi);
-    juce::Thread::sleep(30);
 
-    for (int block = 0; block < 64; ++block)
+    for (int block = 0; block < 8; ++block)
+    {
+        processor.processBlock(buffer, midi);
+        playHead.advance(blockSize);
+    }
+    juce::Thread::sleep(40);
+
+    playHead.setPlaying(true);
+    for (int block = 0; block < playingBlocks; ++block)
     {
         for (int i = 0; i < blockSize; ++i)
         {
@@ -79,12 +120,22 @@ int main()
             buffer.setSample(1, i, value * 0.5f);
         }
         processor.processBlock(buffer, midi);
+        playHead.advance(blockSize);
+    }
+
+    playHead.setPlaying(false);
+    for (int block = 0; block < 8; ++block)
+    {
+        buffer.clear();
+        processor.processBlock(buffer, midi);
+        playHead.advance(blockSize);
     }
 
     capture->setValueNotifyingHost(0.0f);
     processor.processBlock(buffer, midi);
-    juce::Thread::sleep(100);
+    juce::Thread::sleep(120);
     processor.releaseResources();
+    processor.setPlayHead(nullptr);
 
     juce::Array<juce::File> files;
     captureRoot().findChildFiles(files, juce::File::findFiles, false, "*.wav");
@@ -100,19 +151,33 @@ int main()
         return 3;
     }
 
+    if (!newest.getFileName().contains("tap-42-"))
+    {
+        std::cerr << "FAIL: Tap ID is missing from capture filename: " << newest.getFileName() << "\n";
+        return 4;
+    }
+
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(newest));
     if (reader == nullptr)
     {
         std::cerr << "FAIL: Could not open capture WAV through JUCE reader\n";
-        return 4;
+        return 5;
     }
 
     if (reader->bitsPerSample != 32 || !reader->usesFloatingPointData)
     {
         std::cerr << "FAIL: WAV is not IEEE float32\n";
-        return 5;
+        return 6;
+    }
+
+    const auto expectedSamples = static_cast<int64_t>(playingBlocks * blockSize);
+    if (reader->lengthInSamples != expectedSamples)
+    {
+        std::cerr << "FAIL: Transport gate wrote " << reader->lengthInSamples
+                  << " samples; expected exactly " << expectedSamples << "\n";
+        return 7;
     }
 
     const auto samplesToRead = static_cast<int>(juce::jmin<int64>(reader->lengthInSamples, 4096));
@@ -120,7 +185,7 @@ int main()
     if (!reader->read(&captured, 0, samplesToRead, 0, true, true))
     {
         std::cerr << "FAIL: Could not decode capture WAV\n";
-        return 6;
+        return 8;
     }
 
     bool foundNonZero = false;
@@ -135,10 +200,10 @@ int main()
     if (!foundNonZero)
     {
         std::cerr << "FAIL: Capture WAV contains only zeros\n";
-        return 7;
+        return 9;
     }
 
-    std::cout << "PASS: transparent processing and non-zero float32 capture: "
+    std::cout << "PASS: transparent processing, transport-gated exact length, Tap ID, and float32 capture: "
               << newest.getFullPathName() << "\n";
     newest.deleteFile();
     return 0;

@@ -1,11 +1,9 @@
-from __future__ import annotations
-
+﻿from __future__ import annotations
 import json
 import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 READ_ONLY_METHODS = frozenset(
     {
         "bridge_status",
@@ -21,37 +19,16 @@ READ_ONLY_METHODS = frozenset(
         "browser_search",
     }
 )
-CAPTURE_METHODS = frozenset(
-    {
-        "agent_audio_tap",
-        "capture_probe_setup",
-        "capture_probe_refresh",
-        "capture_transport",
-        "chibitap_capture",
-    }
-)
-BOUNDED_WRITE_METHODS = frozenset(
-    {
-        "parameter_set",
-        "track_mixer_parameter_set",
-        "track_set",
-        "device_parameter_set",
-        "device_enabled_set",
-    }
-)
-
-
+CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture"})
+BOUNDED_WRITE_METHODS = frozenset({"parameter_set", "track_mixer_parameter_set", "track_set", "device_parameter_set", "device_enabled_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
-
-
 @dataclass(slots=True)
 class _LiveTransport:
     host: str = "127.0.0.1"
     port: int = 18765
     timeout: float = 10.0
     max_response_bytes: int = 8 * 1024 * 1024
-
     def _request(self, method: str, params: dict[str, Any] | None = None) -> Any:
         request = {
             "jsonrpc": "2.0",
@@ -82,7 +59,6 @@ class _LiveTransport:
         if "result" not in response:
             raise LiveBridgeError("Live bridge response did not contain a result")
         return response["result"]
-
     def _read_line(self, client: socket.socket) -> bytes:
         chunks: list[bytes] = []
         total = 0
@@ -101,10 +77,8 @@ class _LiveTransport:
                 break
             chunks.append(chunk)
         return b"".join(chunks)
-
     def status(self) -> dict[str, Any]:
         return self._request("bridge_status")
-
     def _require_method(self, capability: str, method: str) -> dict[str, Any]:
         status = self.status()
         advertised = status.get("capabilities", {}).get(capability, [])
@@ -113,20 +87,15 @@ class _LiveTransport:
                 f"Live bridge does not advertise {capability} capability for method: {method}"
             )
         return status
-
-
 @dataclass(slots=True)
 class LiveBridgeClient(_LiveTransport):
     """Read-only model-facing Live client."""
-
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         if method not in READ_ONLY_METHODS:
             raise LiveBridgeError(f"Method is not available through the read-only client: {method}")
         return self._request(method, params)
-
     def status(self) -> dict[str, Any]:
         return self.call("bridge_status")
-
     def set_summary(
         self,
         *,
@@ -148,12 +117,9 @@ class LiveBridgeClient(_LiveTransport):
                 "include_master_track": include_master_track,
             },
         )
-
-
 @dataclass(slots=True)
 class LiveCaptureClient(_LiveTransport):
     """Opt-in bounded capture control for probe setup and playback."""
-
     def capture(
         self,
         command: str,
@@ -178,7 +144,6 @@ class LiveCaptureClient(_LiveTransport):
         if tap_port is not None:
             params["port"] = int(tap_port)
         return self._request("agent_audio_tap", params)
-
     def setup_probe(
         self,
         *,
@@ -205,6 +170,75 @@ class LiveCaptureClient(_LiveTransport):
             params["expected_set_signature"] = expected_set_signature
         return self._request("capture_probe_refresh", params)
 
+
+    def setup_chibitap(
+        self,
+        *,
+        placement: str = "master",
+        track_index: int | None = None,
+        expected_track_name: str | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if placement not in {"master", "track"}:
+            raise LiveBridgeError("placement must be master or track")
+        if placement == "track" and (track_index is None or not expected_track_name):
+            raise LiveBridgeError("track placement requires track_index and expected_track_name")
+        if verify_capability:
+            self._require_method("capture", "chibitap_setup")
+        params: dict[str, Any] = {"placement": placement}
+        if track_index is not None:
+            params["track_index"] = int(track_index)
+        if expected_track_name is not None:
+            params["expected_track_name"] = expected_track_name
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("chibitap_setup", params)
+
+    def configure_chibitap(
+        self,
+        *,
+        expected_device_id: int,
+        placement: str = "master",
+        track_index: int | None = None,
+        expected_track_name: str | None = None,
+        tap_id: int | None = None,
+        expected_tap_id: int | None = None,
+        capture_enabled: bool | None = None,
+        expected_capture_enabled: bool | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if placement not in {"master", "track"}:
+            raise LiveBridgeError("placement must be master or track")
+        if placement == "track" and (track_index is None or not expected_track_name):
+            raise LiveBridgeError("track placement requires track_index and expected_track_name")
+        if tap_id is None and capture_enabled is None:
+            raise LiveBridgeError("configure_chibitap requires tap_id and/or capture_enabled")
+        if tap_id is not None and expected_tap_id is None:
+            raise LiveBridgeError("expected_tap_id is required when changing tap_id")
+        if capture_enabled is not None and expected_capture_enabled is None:
+            raise LiveBridgeError("expected_capture_enabled is required when changing capture_enabled")
+        if verify_capability:
+            self._require_method("capture", "chibitap_configure")
+        params: dict[str, Any] = {"placement": placement, "expected_device_id": int(expected_device_id)}
+        if track_index is not None:
+            params["track_index"] = int(track_index)
+        if expected_track_name is not None:
+            params["expected_track_name"] = expected_track_name
+        if tap_id is not None:
+            params["tap_id"] = int(tap_id)
+            params["expected_tap_id"] = int(expected_tap_id)
+        if capture_enabled is not None:
+            if type(capture_enabled) is not bool or type(expected_capture_enabled) is not bool:
+                raise LiveBridgeError("capture_enabled and expected_capture_enabled must be booleans")
+            params["capture_enabled"] = capture_enabled
+            params["expected_capture_enabled"] = expected_capture_enabled
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("chibitap_configure", params)
+
+
     def set_chibitap_capture(
         self,
         enabled: bool,
@@ -228,6 +262,7 @@ class LiveCaptureClient(_LiveTransport):
             params["expected_device_id"] = int(expected_device_id)
         return self._request("chibitap_capture", params)
 
+
     def transport(
         self,
         action: str = "status",
@@ -250,7 +285,6 @@ class LiveCaptureClient(_LiveTransport):
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
         return self._request("capture_transport", params)
-
 
 @dataclass(slots=True)
 class LivePilotWriteClient(_LiveTransport):

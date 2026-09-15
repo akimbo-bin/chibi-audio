@@ -45,13 +45,13 @@ Responsibilities stay separated:
 - local Chibi Audio services own capture manifests, artifact hashing, analysis and experiment comparison;
 - Chibi Core remains the eventual workflow authority.
 
-The model-facing bridge exposes a dedicated `chibitap_capture` capability rather than a generic plugin setter. It currently refuses to act unless ChibiTap is the final Main device, its exact device identity and current Capture value match fresh observations, and any supplied Set signature still matches.
+The model-facing bridge exposes dedicated `chibitap_setup`, `chibitap_configure`, `chibitap_capture`, and bounded transport capabilities rather than a generic plugin setter. Placement/configuration is fenced by exact track name/index, final-device identity, expected Tap ID / Capture state, and Set signature; capture toggles likewise require fresh before-state guards.
 
 The packaged Max for Live AgentAudioTap implementation remains available as an experimental/fallback adapter for Live-specific cases where Max provides unique value. It is not the primary capture foundation.
 
 ### Current proof and next boundary
 
-Single-tap capture is proven in the real KISSKISSKISS lab Set with no Export Audio/Video dialog and no CUA. The remaining audio-plane boundary is deterministic range alignment: pre-arm writers, gate writes against host timeline/sample position, expose durable tap instance identity, and capture Main/BASS/DRUMS/source taps from the same musical range in one playback pass.
+ChibiTap 0.2.0 multi-tap capture is proven in the real KISSKISSKISS lab Set with no Export Audio/Video dialog and no CUA. Main, BASS and DRUMS taps use durable Tap IDs and host-play gating and produced equal-length sample-aligned float32 artifacts in one playback pass. The remaining audio-plane boundary is deterministic requested-range finality: end/crop on the exact host musical/sample boundary rather than after an externally polled transport stop.
 
 See [connection-contract.md](connection-contract.md), [capture-probe.md](capture-probe.md), and `native/ChibiTap/README.md`.
 ## 5. Plugin knowledge base

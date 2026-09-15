@@ -1,4 +1,4 @@
-﻿#include "CaptureWriter.h"
+#include "CaptureWriter.h"
 
 namespace
 {
@@ -135,7 +135,9 @@ bool CaptureWriter::openCapture()
     const auto timestamp = juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
     const auto captureId = juce::Uuid().toString().substring(0, 8);
     const auto id = getInstanceId();
-    currentFile = root.getChildFile("chibitap-" + id + "-" + timestamp + "-" + captureId + ".wav");
+    const auto configuredTapId = getTapId();
+    const auto tapLabel = configuredTapId > 0 ? "tap-" + juce::String(configuredTapId) + "-" : juce::String();
+    currentFile = root.getChildFile("chibitap-" + tapLabel + id + "-" + timestamp + "-" + captureId + ".wav");
 
     std::unique_ptr<juce::OutputStream> output = currentFile.createOutputStream();
     if (output == nullptr)

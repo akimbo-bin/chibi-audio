@@ -6,14 +6,16 @@ ChibiTap is the primary Chibi Audio capture implementation. It is a small JUCE/V
 
 Typed Live control is split into two narrow capabilities:
 
-- `chibitap_capture` - toggles only the final Main ChibiTap `Capture` parameter and requires fresh before-state guards;
+- `chibitap_setup` - ensures exactly one final ChibiTap at an exact Main/track target;
+- `chibitap_configure` - guarded Tap ID and Capture configuration for that exact device;
+- `chibitap_capture` - narrow Main-only Capture toggle retained for compatibility;
 - `capture_transport` - bounded `status`, `seek`, `play`, and `stop` control.
 
 The first end-to-end Live proof captured real non-zero 48 kHz stereo float32 audio with no Export Audio/Video dialog and no CUA. A control capture over a silent musical range produced an all-zero file exactly as expected.
 
 ### Current limitation
 
-The current sequence arms capture before playback and disarms after stopping, so capture artifacts contain lead/tail around the requested musical window. This is acceptable for the single-tap proof but not for synchronized source forensics. The next implementation must pre-arm the writer and gate sample writes against a shared host timeline/range so multiple ChibiTap instances begin and end on the same samples.
+ChibiTap 0.2.0 may be armed while stopped but writes only while the host playhead reports playback. Main/BASS/DRUMS therefore produced exactly equal sample counts in one Live pass. The remaining issue is requested-range finality: the coordinator still polls transport and can issue `stop` late, so all taps share the same overrun. The next capture-session layer must terminate or crop on the exact requested host beat/sample boundary.
 
 ## Experimental/fallback path: AgentAudioTap Max for Live
 

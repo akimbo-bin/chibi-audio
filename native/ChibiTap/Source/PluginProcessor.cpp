@@ -15,6 +15,16 @@ ChibiTapAudioProcessor::ChibiTapAudioProcessor()
 
     captureParameter = parameter.get();
     addParameter(parameter.release());
+
+    auto tapId = std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID { "tap_id", 1 },
+        "Tap ID",
+        0,
+        9999,
+        0);
+
+    tapIdParameter = tapId.get();
+    addParameter(tapId.release());
 }
 
 ChibiTapAudioProcessor::~ChibiTapAudioProcessor()
@@ -49,16 +59,29 @@ void ChibiTapAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     juce::ScopedNoDenormals noDenormals;
 
     const auto shouldCapture = captureParameter != nullptr && captureParameter->get();
+    const auto configuredTapId = tapIdParameter != nullptr ? tapIdParameter->get() : 0;
+    captureWriter.setTapId(configuredTapId);
     captureWriter.setCaptureRequested(shouldCapture);
 
+    auto transportAllowsCapture = true;
+    if (auto* hostPlayHead = getPlayHead())
+    {
+        if (const auto position = hostPlayHead->getPosition())
+            transportAllowsCapture = position->getIsPlaying();
+        else
+            transportAllowsCapture = false;
+    }
+
     // Deliberately read-only: ChibiTap never modifies the host audio buffer.
-    captureWriter.push(buffer);
+    if (shouldCapture && transportAllowsCapture)
+        captureWriter.push(buffer);
 }
 
 void ChibiTapAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     juce::XmlElement state("ChibiTapState");
     state.setAttribute("instanceId", instanceId);
+    state.setAttribute("tapId", tapIdParameter != nullptr ? tapIdParameter->get() : 0);
     copyXmlToBinary(state, destData);
 }
 
@@ -72,6 +95,11 @@ void ChibiTapAudioProcessor::setStateInformation(const void* data, int sizeInByt
             instanceId = restoredId;
             captureWriter.setInstanceId(instanceId);
         }
+
+        const auto restoredTapId = juce::jlimit(0, 9999, state->getIntAttribute("tapId", 0));
+        if (tapIdParameter != nullptr)
+            tapIdParameter->setValueNotifyingHost(tapIdParameter->convertTo0to1(static_cast<float>(restoredTapId)));
+        captureWriter.setTapId(restoredTapId);
     }
 
     if (captureParameter != nullptr)
