@@ -42,6 +42,22 @@ def _sine(frequency: float, seconds: float, amplitude: float = 0.5, sample_rate:
     ]
 
 
+def _pulse_train(seconds: float = 2.0, sample_rate: int = 48000):
+    count = round(seconds * sample_rate)
+    starts = [round(value * sample_rate) for value in (0.25, 0.75, 1.25, 1.75)]
+    burst = round(0.02 * sample_rate)
+    frames = []
+    for index in range(count):
+        active_start = next((start for start in starts if start <= index < start + burst), None)
+        if active_start is None:
+            value = 0.0
+        else:
+            offset = index - active_start
+            value = 0.8 * math.sin(2 * math.pi * 2000 * offset / sample_rate)
+        frames.append((value, value))
+    return frames
+
+
 def _require_ffmpeg() -> None:
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("ffmpeg/ffprobe not installed")
@@ -140,6 +156,46 @@ def test_loudness_is_opt_in_and_bounded_to_requested_range(tmp_path: Path) -> No
     assert loudness["true_peak_dbtp"] is not None
     assert loudness["range"]["start_seconds"] == pytest.approx(0.5)
     assert loudness["range"]["end_seconds"] == pytest.approx(2.5)
+
+
+def test_librosa_tonal_adapter_runs_when_available(tmp_path: Path) -> None:
+    _require_ffmpeg()
+    service = AudioAnalysisService()
+    descriptor = next(item for item in service.registry.descriptors() if item.name == "librosa_mir")
+    if not descriptor.available:
+        pytest.skip(descriptor.unavailable_reason or "librosa unavailable")
+    source = tmp_path / "a440.wav"
+    _write_pcm16(source, _sine(440, 1.0, amplitude=0.4))
+    request = AnalysisRequest(
+        capabilities=frozenset({AnalysisCapability.MIR_TONAL}),
+        max_cost=AnalysisCost.MODERATE,
+    )
+
+    tonal = service.analyze(source, request).measurements[AnalysisCapability.MIR_TONAL.value]
+
+    assert tonal["dominant_pitch_class_evidence"] == "A"
+    assert tonal["chroma_profile"]["A"] == max(tonal["chroma_profile"].values())
+    assert tonal["tonal_concentration"] is not None
+
+
+def test_librosa_onset_adapter_detects_synthetic_pulses_when_available(tmp_path: Path) -> None:
+    _require_ffmpeg()
+    service = AudioAnalysisService()
+    descriptor = next(item for item in service.registry.descriptors() if item.name == "librosa_mir")
+    if not descriptor.available:
+        pytest.skip(descriptor.unavailable_reason or "librosa unavailable")
+    source = tmp_path / "pulses.wav"
+    _write_pcm16(source, _pulse_train())
+    request = AnalysisRequest(
+        capabilities=frozenset({AnalysisCapability.MIR_ONSETS}),
+        max_cost=AnalysisCost.MODERATE,
+    )
+
+    onsets = service.analyze(source, request).measurements[AnalysisCapability.MIR_ONSETS.value]
+
+    assert onsets["onset_count"] >= 3
+    assert len(onsets["onset_times_seconds"]) == onsets["onset_count"]
+    assert onsets["tempo_bpm_evidence"] is not None
 
 
 def test_exact_content_and_config_reuse_cache(tmp_path: Path) -> None:
