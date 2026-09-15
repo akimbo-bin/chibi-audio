@@ -16,6 +16,7 @@ from .models import SCHEMA_VERSION, AnalysisReport, AnalysisRequest, AnalyzerDes
 from .production import production_analyzers
 from .semantic import HfClapSemanticAnalyzer
 from .timeline import timeline_analyzers
+from .timbre import LibrosaTimbreAnalyzer
 
 
 class AnalysisUnavailable(ValueError):
@@ -44,6 +45,7 @@ class AnalyzerRegistry:
                 *timeline_analyzers(),
                 FfmpegLoudnessAnalyzer(),
                 LibrosaMirAnalyzer(),
+                LibrosaTimbreAnalyzer(),
                 BasicPitchTranscriptionAnalyzer(),
                 HfClapSemanticAnalyzer(),
             )
