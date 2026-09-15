@@ -72,6 +72,9 @@ def parse_session_tap(value: str) -> CaptureSessionTap:
                 signal_point = normalized
                 target = remainder
             else:
+                # Preserve legacy target names containing ':' exactly. A four-part
+                # form is interpreted as signal-point syntax only when the third
+                # field is one of the three reviewed signal-point identifiers.
                 signal_point = "post_fx"
                 target = maybe_signal_point + ":" + remainder
         else:
@@ -138,6 +141,8 @@ def _expected_signal_point_index(
         for index, device in enumerate(devices):
             if _device_type(read_client, device, type_cache) == 2:
                 return index
+        # A valid ChibiTap is itself an audio effect, so reaching this boundary
+        # means the Live type information did not describe the observed chain.
         raise CaptureError("target track exposes no audio-effect device; cannot verify pre_fx ChibiTap")
     if signal_point == "post_instrument":
         instruments = [
@@ -220,6 +225,9 @@ def resolve_session_taps(
         if capture is None or tap_id_param is None:
             raise CaptureError(f"ChibiTap on {track.get('name')!r} does not expose Capture + Tap ID")
         if float(capture.get("value", 0.0)) >= 0.5:
+            # Live can briefly report the previous host-parameter value immediately
+            # after a prior session disarms a tap. Re-read once before refusing the
+            # next session; never mutate an unexpectedly armed tap automatically.
             time.sleep(0.2)
             params = _parameters_by_name(read_client, device_id)
             capture = params.get("Capture")
@@ -431,6 +439,8 @@ def run_capture_session(
                 expected_capture_enabled=False,
                 expected_set_signature=set_signature,
             )
+            # configure_chibitap can have changed Capture before its response is
+            # validated below, so register the tap for guaranteed cleanup first.
             armed.append(tap)
             arm_verification[tap.tap_id] = _verified_arm_proof(tap, result)
 
