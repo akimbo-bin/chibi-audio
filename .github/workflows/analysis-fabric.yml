@@ -1,18 +1,12 @@
 name: Analysis fabric
 
 on:
-  push:
-    branches:
-      - feat/analysis-fabric-8
-    paths:
-      - "src/chibi_audio/analysis/**"
-      - "tests/test_analysis_*.py"
-      - ".github/workflows/analysis-fabric.yml"
   pull_request:
     paths:
       - "src/chibi_audio/analysis/**"
       - "tests/test_analysis_*.py"
       - ".github/workflows/analysis-fabric.yml"
+  workflow_dispatch:
 
 jobs:
   test:
