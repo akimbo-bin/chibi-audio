@@ -209,18 +209,36 @@ def test_capture_transport_seek_and_guards():
     result = client.transport("seek", time=68.0, expected_set_signature="sig-2")
     assert result["method"] == "capture_transport"
     params = client.calls[-1][1]
-    assert params == {
-        "action": "seek",
-        "time": 68.0,
-        "expected_set_signature": "sig-2",
+    assert params == {"action": "seek", "time": 68.0, "expected_set_signature": "sig-2"}
+
+    scheduled = client.transport(
+        "play_until",
+        time=64.0,
+        end_time=68.0,
+        expected_set_signature="sig-range",
+    )
+    assert scheduled["method"] == "capture_transport"
+    assert client.calls[-1][1] == {
+        "action": "play_until",
+        "time": 64.0,
+        "end_time": 68.0,
+        "expected_set_signature": "sig-range",
     }
+
     with pytest.raises(LiveBridgeError, match="seek requires time"):
         client.transport("seek")
-    with pytest.raises(LiveBridgeError, match="must be status, seek, play, or stop"):
+    with pytest.raises(LiveBridgeError, match="play_until requires time"):
+        client.transport("play_until", end_time=68.0)
+    with pytest.raises(LiveBridgeError, match="play_until requires end_time"):
+        client.transport("play_until", time=64.0)
+    with pytest.raises(LiveBridgeError, match="greater than time"):
+        client.transport("play_until", time=68.0, end_time=68.0)
+    with pytest.raises(LiveBridgeError, match="only valid for play_until"):
+        client.transport("status", end_time=68.0)
+    with pytest.raises(LiveBridgeError, match="must be status"):
         client.transport("continue")
     with pytest.raises(LiveBridgeError, match="time must be >= 0"):
         client.transport("status", time=-1)
-
 
 def test_chibitap_setup_targets_exact_track_identity():
     assert "chibitap_setup" in CAPTURE_METHODS

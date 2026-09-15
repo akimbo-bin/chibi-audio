@@ -22,3 +22,10 @@ def test_chibitap_surface_is_typed_and_does_not_expose_generic_loading():
     assert "chibitap_configure" in capture_line
     assert "load_device" not in capture_line
     assert "track_insert_device" not in capture_line
+
+
+def test_capture_play_until_is_scheduled_inside_live():
+    source = Path("bridge/ChibiAudioBridge/bridge.py").read_text(encoding="utf-8")
+    assert 'action not in ("status", "seek", "play", "stop", "play_until")' in source
+    assert "self.schedule_message(1, check)" in source
+    assert 'result["last_scheduled_stop_time"]' in source
