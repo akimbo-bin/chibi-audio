@@ -323,6 +323,31 @@ def compare_reports(
                 "interpretation_note": "key candidates are signal-derived rankings; matching labels do not establish authoritative project key",
             }
 
+    timbre_key = AnalysisCapability.MIR_TIMBRE.value
+    if timbre_key in common:
+        a = left.measurements[timbre_key]
+        b = right.measurements[timbre_key]
+        if isinstance(a, dict) and isinstance(b, dict):
+            comparisons[timbre_key] = {
+                "mfcc_shape_mean_cosine_similarity": _mapping_cosine(
+                    a.get("mfcc_shape_mean"), b.get("mfcc_shape_mean")
+                ),
+                "mfcc_shape_std_cosine_similarity": _mapping_cosine(
+                    a.get("mfcc_shape_std"), b.get("mfcc_shape_std")
+                ),
+                "spectral_contrast_mean_cosine_similarity": _mapping_cosine(
+                    a.get("spectral_contrast_mean_db"), b.get("spectral_contrast_mean_db")
+                ),
+                "spectral_bandwidth_median_hz_delta": _nested_delta(
+                    a, b, "spectral_bandwidth", "median_hz"
+                ),
+                "harmonic_energy_fraction_delta": _delta(a, b, "harmonic_energy_fraction"),
+                "percussive_energy_fraction_delta": _delta(a, b, "percussive_energy_fraction"),
+                "interpretation_note": (
+                    "timbre similarities compare signal descriptors only and are not semantic or quality scores"
+                ),
+            }
+
     structure_key = AnalysisCapability.MIR_STRUCTURE.value
     if structure_key in common:
         a = left.measurements[structure_key]
