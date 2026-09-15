@@ -37,16 +37,25 @@ Device parameter snapshots record exact track/device identity plus exposed param
 
 `chibi_audio.facade.ChibiAudioFacade` is a transport-agnostic model-facing boundary intended to sit behind a secure MCP/connector endpoint. It exposes reviewed production operations and does not expose raw Live JSON-RPC.
 
-The first facade surface covers:
-- bridge status;
-- project snapshot;
-- device parameters;
-- track mixer state;
-- bounded track volume/pan;
-- bounded track properties;
+The facade publishes explicit JSON-schema-shaped tool definitions rather than asking a transport to infer capabilities from Python internals. The current surface includes 14 tools across:
+- bridge/project/device/mixer reads;
+- reversible audition planning;
+- parameter snapshots and diffs;
+- deterministic audio analysis and time-localized high-end diagnostics;
+- bounded track volume/pan/properties;
 - bounded device parameters and enable state.
 
-Authentication/network exposure is deliberately separate from the Live Remote Script. Port `18765` remains localhost-only.
+There is deliberately no `eval`, arbitrary Python, raw Live call, raw JSON-RPC, or click/mouse compatibility tool.
+
+### Artifact confinement
+
+Model-facing audio analysis does not accept arbitrary absolute filesystem paths. An adapter configures one artifact root and callers provide paths relative to that root. The facade resolves the path, refuses absolute paths and `..`/symlink escapes, and verifies the target is a real file before analysis.
+
+This lets a secure MCP adapter expose analysis of known ChibiTap/experiment artifacts without turning the audio tool into a general filesystem-reading capability.
+
+A read-only KISS smoke test used the facade itself against the local artifact root and reproduced the high-end diagnostic result for `D64_HOUSE.wav` without contacting Ableton.
+
+Authentication/network exposure is deliberately separate from the Live Remote Script. Port `18765` remains localhost-only. The intended deployment path is to mount this facade behind the existing Chibi secure MCP/tunnel boundary rather than exposing the Live bridge directly or inventing a second workflow authority.
 
 ## Parallel-lane boundary
 
