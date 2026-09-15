@@ -19,7 +19,7 @@ READ_ONLY_METHODS = frozenset(
         "browser_search",
     }
 )
-CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture"})
+CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh"})
 BOUNDED_WRITE_METHODS = frozenset({"parameter_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
@@ -169,6 +169,25 @@ class LiveCaptureClient(_LiveTransport):
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
         return self._request("capture_probe_refresh", params)
+
+
+    def refresh_chibitap(
+        self,
+        *,
+        expected_device_id: int,
+        expected_capture_value: float = 0.0,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if verify_capability:
+            self._require_method("capture", "chibitap_refresh")
+        params: dict[str, Any] = {
+            "expected_device_id": int(expected_device_id),
+            "expected_capture_value": float(expected_capture_value),
+        }
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("chibitap_refresh", params)
 
 
     def setup_chibitap(

@@ -168,3 +168,19 @@ def test_chibitap_configure_guards_tap_id_and_capture():
     }
     with pytest.raises(LiveBridgeError, match="expected_tap_id"):
         client.configure_chibitap(expected_device_id=1, tap_id=1)
+
+
+def test_chibitap_refresh_is_explicit_and_guarded():
+    assert "chibitap_refresh" in CAPTURE_METHODS
+    client = FakeCaptureClient()
+    result = client.refresh_chibitap(
+        expected_device_id=1234,
+        expected_capture_value=0.0,
+        expected_set_signature="sig-refresh",
+    )
+    assert result["method"] == "chibitap_refresh"
+    assert client.calls[-1][1] == {
+        "expected_device_id": 1234,
+        "expected_capture_value": 0.0,
+        "expected_set_signature": "sig-refresh",
+    }
