@@ -8,6 +8,7 @@ import tempfile
 from typing import Iterable, Protocol
 
 from .basic_pitch_adapter import BasicPitchTranscriptionAnalyzer
+from .continuity import continuity_analyzers
 from .core import default_core_analyzers
 from .io import AnalysisContext
 from .librosa_adapter import LibrosaMirAnalyzer
@@ -43,6 +44,7 @@ class AnalyzerRegistry:
                 *default_core_analyzers(),
                 *production_analyzers(),
                 *timeline_analyzers(),
+                *continuity_analyzers(),
                 FfmpegLoudnessAnalyzer(),
                 LibrosaMirAnalyzer(),
                 LibrosaTimbreAnalyzer(),

@@ -13,6 +13,8 @@ class AnalysisCapability(StrEnum):
     LEVELS = "audio.levels"
     ACTIVITY = "audio.activity"
     STEREO = "audio.stereo"
+    STEREO_TIMELINE = "audio.stereo.timeline"
+    LOOP_SEAM = "audio.loop.seam"
     SPECTRUM = "audio.spectrum"
     SPECTRAL_TIMELINE = "audio.spectrum.timeline"
     DYNAMICS = "audio.dynamics"
