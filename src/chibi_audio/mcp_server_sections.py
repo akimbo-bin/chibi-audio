@@ -5,6 +5,8 @@ from typing import Annotated, Any
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .capture import _safe_id
+from .capture_session import parse_session_tap, run_capture_session
 from .facade import ChibiAudioFacade
 from .locator_client import LocatorBridgeClient
 from .mcp_server import (
@@ -21,6 +23,7 @@ SectionOccurrence = Annotated[int, Field(ge=1, le=100, strict=True)]
 LocatorLimit = Annotated[int, Field(ge=1, le=4096, strict=True)]
 TapSpec = Annotated[str, Field(min_length=5, max_length=1000)]
 TapSpecList = Annotated[list[TapSpec], Field(max_length=32)]
+ExperimentId = Annotated[str, Field(min_length=1, max_length=200)]
 
 
 def build_mcp_server(
@@ -35,6 +38,12 @@ def build_mcp_server(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
+        openWorldHint=False,
+    )
+    write_annotations = ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
         openWorldHint=False,
     )
 
@@ -131,6 +140,65 @@ def build_mcp_server(
             )
         except Exception as exc:  # noqa: BLE001
             raise _safe_tool_error(exc) from None
+
+    if settings.allow_writes:
+
+        @server.tool(
+            title="Capture one named song section",
+            description=(
+                "Resolve an artist-authored locator section and execute the typed ChibiTap capture session for that "
+                "exact beat range. The planner Set signature is rechecked inside the capture executor before any "
+                "transport or ChibiTap effect. Finalized artifacts are written below the configured artifact root."
+            ),
+            annotations=write_annotations,
+            structured_output=True,
+        )
+        def capture_section(
+            name: ObjectName,
+            experiment_id: ExperimentId,
+            tap_specs: TapSpecList,
+            occurrence: SectionOccurrence | None = None,
+            include_analysis: bool = True,
+            limit: LocatorLimit = 256,
+        ) -> dict[str, Any]:
+            try:
+                if not tap_specs:
+                    raise ValueError("capture_section requires at least one tap spec")
+                section_map = fresh_sections(limit)
+                plan = build_section_capture_plan(
+                    section_map,
+                    name,
+                    occurrence=occurrence,
+                    tap_specs=tap_specs,
+                )
+                set_signature = str(plan.get("set_signature") or "")
+                if not set_signature:
+                    raise ValueError("locator read did not return a Set signature")
+                safe_experiment = _safe_id(experiment_id)
+                output_dir = settings.artifact_root / "section-captures" / safe_experiment
+                manifest_path = run_capture_session(
+                    experiment_id=safe_experiment,
+                    taps=[parse_session_tap(value) for value in tap_specs],
+                    output_dir=output_dir,
+                    start_beat=float(plan["capture_request"]["start_beat"]),
+                    end_beat=float(plan["capture_request"]["end_beat"]),
+                    host="127.0.0.1",
+                    port=settings.live_port,
+                    include_analysis=include_analysis,
+                    expected_set_signature=set_signature,
+                )
+                manifest = manifest_path.resolve()
+                root = settings.artifact_root.resolve()
+                relative_manifest = manifest.relative_to(root)
+                return {
+                    "effect_state": "STARTED_CONFIRMED",
+                    "set_signature": set_signature,
+                    "section": plan["section"],
+                    "capture_request": plan["capture_request"],
+                    "manifest_artifact": relative_manifest.as_posix(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                raise _safe_tool_error(exc) from None
 
     return server
 
