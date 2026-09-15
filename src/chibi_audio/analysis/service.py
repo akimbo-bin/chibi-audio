@@ -15,6 +15,7 @@ from .loudness import FfmpegLoudnessAnalyzer
 from .models import SCHEMA_VERSION, AnalysisReport, AnalysisRequest, AnalyzerDescriptor
 from .production import production_analyzers
 from .semantic import HfClapSemanticAnalyzer
+from .timeline import timeline_analyzers
 
 
 class AnalysisUnavailable(ValueError):
@@ -40,6 +41,7 @@ class AnalyzerRegistry:
             (
                 *default_core_analyzers(),
                 *production_analyzers(),
+                *timeline_analyzers(),
                 FfmpegLoudnessAnalyzer(),
                 LibrosaMirAnalyzer(),
                 BasicPitchTranscriptionAnalyzer(),

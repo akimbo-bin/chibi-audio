@@ -14,6 +14,8 @@ class AnalysisCapability(StrEnum):
     ACTIVITY = "audio.activity"
     STEREO = "audio.stereo"
     SPECTRUM = "audio.spectrum"
+    SPECTRAL_TIMELINE = "audio.spectrum.timeline"
+    DYNAMICS = "audio.dynamics"
     TRANSIENTS = "audio.transients"
     TEXTURE = "audio.texture"
     STEREO_BANDS = "audio.stereo.bands"
@@ -63,6 +65,7 @@ class AnalysisRequest:
     spectral_window_size: int = 4096
     spectral_max_windows: int = 16
     spectral_rolloff_fraction: float = 0.85
+    timeline_max_points: int = 32
     semantic_queries: tuple[str, ...] = ()
     semantic_max_windows: int = 12
     transcription_max_notes: int = 512
@@ -97,6 +100,8 @@ class AnalysisRequest:
             raise ValueError("spectral_max_windows must be between 1 and 256")
         if not 0.5 <= self.spectral_rolloff_fraction < 1.0:
             raise ValueError("spectral_rolloff_fraction must be in [0.5, 1.0)")
+        if not 4 <= self.timeline_max_points <= 128:
+            raise ValueError("timeline_max_points must be between 4 and 128")
         if len(semantic_queries) > 64:
             raise ValueError("semantic_queries is limited to 64 prompts")
         if any(not value for value in semantic_queries):
@@ -121,6 +126,7 @@ class AnalysisRequest:
             "spectral_window_size": self.spectral_window_size,
             "spectral_max_windows": self.spectral_max_windows,
             "spectral_rolloff_fraction": self.spectral_rolloff_fraction,
+            "timeline_max_points": self.timeline_max_points,
             "semantic_queries": list(self.semantic_queries),
             "semantic_max_windows": self.semantic_max_windows,
             "transcription_max_notes": self.transcription_max_notes,
