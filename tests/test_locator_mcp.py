@@ -1,0 +1,80 @@
+import asyncio
+
+import pytest
+
+pytest.importorskip("mcp")
+
+from chibi_audio.mcp_server import AudioMcpSettings
+from chibi_audio.mcp_server_sections import build_mcp_server
+
+
+class FakeFacade:
+    def call(self, name, arguments=None):
+        if name == "status":
+            return {"capabilities": {"read": ["set_summary"]}}
+        return {"tool": name, "arguments": arguments or {}}
+
+
+class FakeLocatorClient:
+    def __init__(self):
+        self.calls = []
+
+    def locators(self, *, limit=256):
+        self.calls.append(limit)
+        return {
+            "set_signature": "sig-locators",
+            "current_song_time": 20.0,
+            "last_event_time": 64.0,
+            "song_length": 65.0,
+            "locator_count": 4,
+            "truncated": False,
+            "locators": [
+                {"index": 0, "id": 201, "name": "Intro", "time": 0.0},
+                {"index": 1, "id": 202, "name": "Build", "time": 16.0},
+                {"index": 2, "id": 203, "name": "Drop 1", "time": 32.0},
+                {"index": 3, "id": 204, "name": "Bridge", "time": 48.0},
+            ],
+        }
+
+
+def tool_map(server):
+    return {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+
+def make_server(tmp_path):
+    locator = FakeLocatorClient()
+    server = build_mcp_server(
+        AudioMcpSettings(artifact_root=tmp_path, allow_writes=False),
+        facade=FakeFacade(),
+        locator_client=locator,
+    )
+    return server, locator
+
+
+def test_locator_tools_are_read_only_and_present(tmp_path):
+    server, _locator = make_server(tmp_path)
+    tools = tool_map(server)
+    for name in ("get_locators", "get_sections", "resolve_section", "get_song_position"):
+        assert name in tools
+        assert tools[name].annotations.read_only_hint is True
+        assert tools[name].annotations.destructive_hint is False
+
+
+def test_resolve_section_returns_exact_named_beat_range(tmp_path):
+    server, locator = make_server(tmp_path)
+    result = asyncio.run(server.call_tool("resolve_section", {"name": "drop 1"}))
+    assert result.structured_content["name"] == "Drop 1"
+    assert result.structured_content["start_beat"] == 32.0
+    assert result.structured_content["end_beat"] == 48.0
+    assert result.structured_content["set_signature"] == "sig-locators"
+    assert locator.calls[-1] == 256
+
+
+def test_song_position_reports_active_and_adjacent_sections(tmp_path):
+    server, _locator = make_server(tmp_path)
+    result = asyncio.run(server.call_tool("get_song_position", {}))
+    data = result.structured_content
+    assert data["beat"] == 20.0
+    assert data["active_section"]["name"] == "Build"
+    assert data["previous_section"]["name"] == "Intro"
+    assert data["next_section"]["name"] == "Drop 1"
