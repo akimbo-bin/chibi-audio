@@ -21,6 +21,20 @@ The initial generalized surface includes:
 
 Track/device/parameter IDs can supplement names and indices so stale references fail closed. Generic setters, arbitrary Live Object Model calls, and Python/eval remain unexposed.
 
+## Locator-defined song sections
+
+Ableton Arrangement **Locators** are exposed by the Live Object Model as `cue_points`. Chibi Audio treats them as first-class artist-authored song structure rather than trying to infer every section from audio.
+
+The section-aware MCP adds four read-only tools:
+- `get_locators` returns exact locator names and beat positions plus current/end-of-arrangement timing;
+- `get_sections` treats each locator as the start of a named section and the next locator (or `last_event_time`) as its end;
+- `resolve_section` turns a name such as `Drop 1` into an exact beat range and refuses ambiguous duplicate names unless an occurrence is supplied;
+- `get_song_position` reports the current Arrangement beat plus active/previous/next section context.
+
+This is intentionally beat-based. Beat boundaries remain valid under tempo automation and can feed typed ChibiTap capture/finalization without premature conversion to wall-clock seconds. The artist's locator names are metadata/evidence, not instructions to the model.
+
+The intended downstream command path is therefore straightforward: a worker can resolve `Drop 1` to exact beats, then request capture/analysis of that range without guessing section boundaries from the waveform or hard-coding bars in chat history.
+
 ## Reversible diagnostic audition
 
 `chibi_audio.control` builds temporary audition plans such as hats-only, bass-only, or explicit mute sets from a fresh project snapshot. Planning itself does not mutate Live.
@@ -37,13 +51,15 @@ Device parameter snapshots record exact track/device identity plus exposed param
 
 `chibi_audio.facade.ChibiAudioFacade` is a transport-agnostic model-facing boundary intended to sit behind a secure MCP/connector endpoint. It exposes reviewed production operations and does not expose raw Live JSON-RPC.
 
-The facade publishes explicit JSON-schema-shaped tool definitions rather than asking a transport to infer capabilities from Python internals. The current surface includes 14 tools across:
+The base facade publishes explicit JSON-schema-shaped tool definitions rather than asking a transport to infer capabilities from Python internals. Its current surface includes 14 tools across:
 - bridge/project/device/mixer reads;
 - reversible audition planning;
 - parameter snapshots and diffs;
 - deterministic audio analysis and time-localized high-end diagnostics;
 - bounded track volume/pan/properties;
 - bounded device parameters and enable state.
+
+`chibi_audio.mcp_server_sections` wraps that existing server and adds the four locator/section reads without changing the write authority or exposing the raw Live bridge. The installed `chibi-audio-mcp` command routes through this section-aware server.
 
 There is deliberately no `eval`, arbitrary Python, raw Live call, raw JSON-RPC, or click/mouse compatibility tool.
 
