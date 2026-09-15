@@ -1,3 +1,4 @@
+from .comparison import COMPARISON_SCHEMA_VERSION, compare_reports
 from .manifest import CaptureManifestAnalysisError, analyze_capture_manifest
 from .models import (
     BASIC_CAPABILITIES,
@@ -12,6 +13,7 @@ from .service import AnalysisUnavailable, AnalyzerRegistry, AudioAnalysisService
 
 __all__ = [
     "BASIC_CAPABILITIES",
+    "COMPARISON_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "AnalysisCapability",
     "AnalysisCost",
@@ -23,4 +25,5 @@ __all__ = [
     "AudioAnalysisService",
     "CaptureManifestAnalysisError",
     "analyze_capture_manifest",
+    "compare_reports",
 ]
