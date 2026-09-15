@@ -13,6 +13,8 @@ Callers request only the capabilities they need:
 - `audio.activity`
 - `audio.stereo`
 - `audio.spectrum`
+- `audio.spectrum.timeline`
+- `audio.dynamics`
 - `audio.transients`
 - `audio.texture`
 - `audio.stereo.bands`
@@ -21,6 +23,7 @@ Callers request only the capabilities they need:
 - `audio.mir.beats`
 - `audio.mir.tonal`
 - `audio.mir.key`
+- `audio.mir.timbre`
 - `audio.mir.structure`
 - `audio.mir.pitch`
 - `audio.mir.transcription` (optional Basic Pitch, EXPENSIVE)
@@ -42,6 +45,8 @@ Analysis can also be bounded by exact `start_seconds` / `end_seconds`. PR #7 can
 
 `align_capture_events(...)` is a zero-DSP second-stage primitive over already-computed multi-tap reports. It can cluster onset, beat, structure-boundary, strongest-transient, or Basic Pitch note-start evidence across aligned taps within a caller-supplied tolerance. Cluster span is bounded by that tolerance so chained near-events cannot bridge into a falsely broad coincidence. Coincidence is timing evidence only; it does not prove causal source contribution.
 
+`compare_capture_spectral_overlap(...)` is another zero-DSP second-stage primitive. It pair-normalizes broad-band spectral fractions from already-computed `audio.spectrum` reports, ranks tap pairs by overlap coefficient/cosine similarity, carries RMS difference when available, and reports the dominant overlapping bands. It identifies occupancy candidates only: broad-band overlap is not proof of audible masking.
+
 ## Cheap and moderate production evidence
 
 Cheap signal capabilities share one decoded NumPy pass. Metadata uses `ffprobe` without decoding the payload.
@@ -52,22 +57,29 @@ Cheap signal capabilities share one decoded NumPy pass. Metadata uses `ffprobe` 
 
 `audio.stereo.bands` computes frequency-dependent cross-power correlation and Mid/Side energy across sub, low, mid, high and air bands. It can identify band-local polarity/mono-compatibility evidence that a single broadband correlation value hides.
 
+`audio.dynamics` is CHEAP bounded time-varying channel-power RMS evidence. It reports active-window p10/median/p90, macro p90-to-p10 range, first-vs-second-half level movement, loudest/quietest active windows, largest adjacent RMS change, and a bounded absolute-time timeline. These are RMS dynamics, not LUFS.
+
+`audio.spectrum.timeline` is MODERATE bounded time-varying channel-power FFT evidence. It reports sampled spectral-centroid movement, sub/low/low-mid/mid/high-mid/high/air fractions over time, per-band p10/median/p90 spread, and the largest sampled broad-band spectral shift. `timeline_max_points` bounds report size and is part of cache identity.
+
 `audio.loudness` is MODERATE and uses an explicit FFmpeg `loudnorm` measurement pass. It reports integrated LUFS, loudness range and FFmpeg's measured true peak for the requested range; those numbers are evidence, not mastering targets.
 
 The decode context is lazy and shared. A metadata-only request never decodes audio.
 
 ## MIR evidence
 
-The optional librosa adapter remains MODERATE and currently provides:
+The optional librosa adapters remain MODERATE and currently provide:
 
 - onset count/timing/density plus tempo evidence;
 - `audio.mir.beats`: signal-derived beat times, tempo evidence, beat density, median beat interval and interval coefficient-of-variation;
 - normalized chroma profile plus dominant pitch-class evidence;
 - `audio.mir.key`: all 24 major/minor Krumhansl-Schmuckler template candidates ranked from mean chroma, including the top-six candidates and top-vs-second margin;
 - bounded log-mel novelty/change-point candidates plus local-tempo evidence;
-- pYIN monophonic pitch evidence (`audio.mir.pitch`) with voiced fraction, median/range Hz and MIDI evidence, pitch class and voicing confidence.
+- pYIN monophonic pitch evidence (`audio.mir.pitch`) with voiced fraction, median/range Hz and MIDI evidence, pitch class and voicing confidence;
+- `audio.mir.timbre`: an interpretable level-reduced timbre fingerprint from MFCC shape (C0 excluded), spectral contrast, spectral bandwidth, and HPSS harmonic/percussive energy fractions.
 
 Beat-grid evidence is not authoritative Ableton transport tempo or meter. Key rankings are candidate evidence, not authoritative project key; ambiguity is expected for sparse, percussive, non-tonal, or modal material.
+
+The timbre fingerprint is intended for relative signal similarity and clustering when a semantic model is not provisioned. It is not a semantic label or quality score; CLAP remains the semantic audio/text layer.
 
 pYIN is intentionally described as monophonic evidence. It does not claim to transcribe chords or replace source MIDI.
 
@@ -120,7 +132,7 @@ The result ranks those supplied queries by mean cosine similarity and includes m
 
 `compare_reports(left, right, ...)` operates only on already-computed reports. It never reopens audio. This gives Chibi a cheap second-stage primitive for build/drop contrast, pre/post A/B evidence, mix/reference evidence and aligned captured-tap comparisons.
 
-Comparison covers the current production/MIR/model-backed evidence, including beat stability/tempo and key-candidate/chroma similarity when both reports contain those capabilities. Deltas are explicit `right - left` observations. They never mean better/worse.
+Comparison covers the current production/MIR/model-backed evidence, including dynamics/timeline movement, beat stability/tempo, key-candidate/chroma similarity, timbre-shape similarity, Basic Pitch summaries and identical CLAP-query evidence when both reports contain those capabilities. Deltas are explicit `right - left` observations. They never mean better/worse.
 
 ## Evidence semantics
 
@@ -129,15 +141,18 @@ The core intentionally separates observations from subjective conclusions:
 - sample peak is not true peak;
 - true peak is populated only by the separately identified FFmpeg loudness analyzer;
 - stereo correlation / side energy are evidence, not a width-quality score;
-- broad spectral bands are evidence, not an EQ prescription;
+- broad spectral bands and spectral timelines are evidence, not an EQ prescription;
+- RMS dynamics timelines are not LUFS and do not prescribe a target dynamic range;
 - librosa dominant pitch-class evidence is not a key claim;
 - librosa beat/tempo evidence is not authoritative Live Set tempo or meter;
 - Krumhansl-Schmuckler key ranking is candidate evidence, not authoritative project key;
 - novelty boundaries are not functional song-section labels;
 - pYIN pitch is monophonic evidence, not polyphonic transcription;
+- timbre fingerprints are relative descriptors, not semantic labels;
 - Basic Pitch output is estimated note evidence, not authoritative MIDI;
 - CLAP cosine similarity is semantic evidence relative to supplied prompts, not probability;
-- aligned cross-tap event clusters are timing coincidences, not causal attribution.
+- aligned cross-tap event clusters are timing coincidences, not causal attribution;
+- broad-band cross-tap overlap is occupancy evidence, not proof of masking.
 
 Float ChibiTap captures can exceed normalized magnitude 1.0. The levels report therefore includes sample-over count/fraction instead of silently clipping the evidence.
 
@@ -145,7 +160,7 @@ Float ChibiTap captures can exceed normalized magnitude 1.0. The levels report t
 
 - NumPy: core analysis dependency.
 - FFmpeg/ffprobe: external runtime tools for decode/probe/loudness.
-- librosa (ISC): optional MODERATE MIR adapter; CI-proven on Python 3.11 with 0.11.0.
+- librosa (ISC): optional MODERATE MIR/timbre adapters; CI-proven on Python 3.11 with 0.11.0.
 - Spotify Basic Pitch (Apache-2.0): optional EXPENSIVE transcription adapter with separate real-model CI.
 - Hugging Face Transformers + LAION CLAP (Apache-2.0): optional EXPENSIVE semantic adapter; local-model-only and fail-closed until explicitly provisioned.
 - Essentia: useful research material, but not a core dependency because of AGPLv3 distribution implications.
@@ -164,6 +179,6 @@ analyze_capture_manifest(manifest_ref, capabilities, tap_ids?, max_cost)
 compare_analysis_reports(left_report_ref, right_report_ref)
 ```
 
-The existing generic capability field means beat/key support does not require a new analyzer-specific MCP method. Event alignment can likewise remain a small read-only helper over capture-analysis reports once the MCP worker is ready for that seam.
+The existing generic capability field means the expanding analyzer catalog does not require analyzer-specific MCP methods. Event alignment and capture spectral-overlap comparison can likewise remain small read-only helpers over capture-analysis reports once the MCP worker is ready for that seam.
 
 It should not expose analyzer implementation details as workflow authority. Chibi/Core/ChatGPT decides what evidence is needed; this package computes the requested evidence and returns provenance.
