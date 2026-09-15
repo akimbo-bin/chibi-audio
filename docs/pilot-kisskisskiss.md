@@ -1,4 +1,4 @@
-﻿# KISSKISSKISS pilot
+# KISSKISSKISS pilot
 This song is the proving ground for Chibi Audio. The goal is not to perfect the entire system before touching music; the goal is to prove a safe, repeatable loop that can improve a real human-made track.
 ## Safety boundary
 - The artist's original project is read-only for Chibi Audio experiments.
@@ -154,3 +154,21 @@ The requested window was beats 100-108, but the external coordinator did not iss
 ### Remaining boundary
 
 Host-play gating now excludes stopped-state buffers and Tap IDs provide durable source identity. The remaining audio-plane milestone is exact requested-range finality: terminate or crop capture on the requested host beat/sample boundary rather than after an externally polled transport stop, then package the aligned artifacts, timing evidence, fingerprints and analysis into one experiment manifest.
+
+### Exact requested-range finality proof
+
+The raw multi-tap capture no longer needs to stop on the exact requested beat to become authoritative evidence. `capture_finalize.py` validates that raw Tap ID artifacts are sample-aligned, converts the requested constant-BPM beat interval (and any transport-start pre-roll) to exact sample indices, writes IEEE-float crops, verifies the final sample counts, fingerprints both raw and final artifacts, and writes one JSON experiment manifest. The same path is exposed as `chibi-audio finalize-capture`.
+
+A fresh live proof used the active `KISSKISSKISS Mix - Chibi.als` Main/BASS/DRUMS topology (Tap IDs 1/2/3). The raw playback began at beat 128 and stopped at about beat 139.064 after an external coordinator overrun. All three raw files were exactly **236,032 samples**. The requested authoritative range was beats **128-136 at 135 BPM**, which resolves to **170,667 samples / 3.5555625 s** at 48 kHz.
+
+The exact finalizer produced three 48 kHz stereo float32 artifacts, each exactly **170,667 samples**, with distinct SHA-256 fingerprints. Analysis of that exact common range measured approximately:
+
+- Main / Tap 1: **-8.04 LUFS**, **-1.0 dBTP**;
+- BASS / Tap 2: **-13.01 LUFS**, **+1.9 dBTP** in the floating-point pre-master bus capture;
+- DRUMS / Tap 3: **-10.87 LUFS**, **+3.3 dBTP** in the floating-point pre-master bus capture.
+
+The positive pre-master bus peaks are preserved float-domain evidence, not proof of integer clipping. The manifest records requested beats/tempo, actual transport timing, raw and final format/sample counts, hashes, alignment assertions and optional analysis.
+
+A synthetic regression test also proves non-zero pre-roll handling: when raw capture begins half a beat before the requested range, the finalizer computes a **12,000-sample** offset at 120 BPM / 48 kHz and still returns the exact requested 12,000-sample final interval.
+
+This closes the R1.5 range-finality boundary for constant-tempo sections. Tempo-automated material still needs a tempo-map-aware beat-to-sample model before claiming exact beat finality.

@@ -25,7 +25,7 @@ Scope:
 - reconcile Live state against the saved `.als` snapshot.
 Do not build broad write APIs yet. Do not expose arbitrary Python.
 **Acceptance:** a machine-readable live snapshot explains the open pilot Set and identifies saved-vs-unsaved differences without GUI scraping as the primary source.
-## R1.5 - Connection hardening and typed audio capture - MULTI-TAP PROVEN / RANGE-EXACT NEXT
+## R1.5 - Connection hardening and typed audio capture - PROVEN
 Completed:
 - package the Remote Script bridge in this repository;
 - add an explicit capability handshake with separate read / bounded-write / capture lanes;
@@ -40,20 +40,25 @@ Completed:
 - verify the real artifact as 48 kHz stereo IEEE-float audio with non-zero mastered signal;
 - upgrade ChibiTap to 0.2.0 with host-play transport gating and persistent host-visible `Tap ID`;
 - add guarded typed `chibitap_setup` / `chibitap_configure` operations for exact track placement and identity/configuration;
-- prove one-pass Main/BASS/DRUMS capture with Tap IDs 1/2/3: all three artifacts were 48 kHz stereo float32 and exactly 249,856 samples / 5.205333 s on the active-source proof pass.
+- prove one-pass Main/BASS/DRUMS capture with Tap IDs 1/2/3: all three artifacts were 48 kHz stereo float32 and exactly 249,856 samples / 5.205333 s on the first active-source proof pass;
+- add deterministic exact-range finalization: validate aligned raw taps, translate a constant-BPM requested beat range (including transport pre-roll offset) to sample indices, crop every tap to the same exact float32 sample interval, fingerprint raw/final artifacts, and write one experiment manifest;
+- prove exact finality on the live KISSKISSKISS lab capture for beats **128-136 @ 135 BPM**: three aligned raw taps of 236,032 samples became three exact **170,667-sample** artifacts, with matching final sample counts and distinct SHA-256 fingerprints;
+- expose the finalizer as `chibi-audio finalize-capture` with repeated `TAP_ID:LABEL:PATH` inputs.
 
 Observed control proof: a first capture over a silent transport region produced a valid all-zero file; inspection showed the only soloed track had no clips in that range. Repeating the same typed capture over an active range produced real audio. This is desirable evidence that ChibiTap records the actual host signal rather than fabricating activity.
 
-Known limitation:
-- host-play transport gating now excludes stopped-state lead/tail and keeps multiple taps sample-count aligned;
-- requested **end-beat finality** is not yet deterministic because the coordinator still polls Live and issues `stop` after observing the target, so the active-source three-tap proof requested beats 100-108 but captured a shared overrun through about beat 111.63.
+Range-finality contract:
+- host-play transport gating excludes stopped-state lead/tail and keeps multiple taps sample-count aligned;
+- the coordinator may stop after the requested end beat, but that overrun is raw evidence only, never the authoritative comparison range;
+- final artifacts are cut to the requested sample interval, with requested beats/tempo, actual transport timing, raw/final hashes, sample counts and optional analysis preserved in the manifest;
+- the current pilot uses a `constant_bpm` timing model. Tempo-automated ranges need a tempo-map/sample-boundary model before they may claim the same exact beat semantics.
 
 Next:
-- make the capture-session contract own the target host timeline / beat range and terminate/crop at the exact requested sample boundary rather than relying on external stop polling;
-- attach the Tap ID -> Live track mapping, requested range, actual host timing, stable-file fingerprint and analysis to one experiment manifest;
+- have the capture coordinator call the exact-range finalizer automatically at the end of every multi-tap capture session;
+- carry the Tap ID -> Live track mapping and experiment/change provenance into the same manifest;
 - use Main/BASS/DRUMS/source taps as the normal evidence plane for A/B, loudness-stress and sidechain experiments.
 
-**Acceptance:** a normal A/B capture requires no CUA or Export Audio/Video dialog, produces a fingerprinted float32 artifact linked to an experiment manifest, and multiple taps can capture the same musical range with deterministic alignment.
+**Acceptance: PROVEN on KISSKISSKISS.** A normal A/B capture requires no CUA or Export Audio/Video dialog, produces fingerprinted float32 artifacts linked to one experiment manifest, and multiple taps produce the same exact requested musical sample range with deterministic alignment.
 ## R1.75 - Typed Ableton control and diagnostic audition plane - ACTIVE
 Tracked by [#6](https://github.com/akimbo-bin/chibi-audio/issues/6).
 
