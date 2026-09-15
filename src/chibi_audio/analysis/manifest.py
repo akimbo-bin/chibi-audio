@@ -19,6 +19,32 @@ def _resolve_artifact_path(manifest_path: Path, value: str) -> Path:
     return path
 
 
+def _validate_digest(value: object, tap_id: int) -> str:
+    if not isinstance(value, str):
+        raise CaptureManifestAnalysisError(f"tap {tap_id} final artifact has no valid SHA-256")
+    normalized = value.lower()
+    if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+        raise CaptureManifestAnalysisError(f"tap {tap_id} final artifact has no valid SHA-256")
+    return normalized
+
+
+def _reconcile_artifact_identity(path: Path, final: dict[str, Any], tap_id: int) -> None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError as exc:
+        raise CaptureManifestAnalysisError(f"tap {tap_id} final artifact is missing: {path}") from exc
+    expected_bytes = final.get("bytes")
+    expected_modified = final.get("modified_ns")
+    if expected_bytes is not None and stat.st_size != int(expected_bytes):
+        raise CaptureManifestAnalysisError(
+            f"tap {tap_id} final artifact size changed after finalization: {stat.st_size} != {expected_bytes}"
+        )
+    if expected_modified is not None and stat.st_mtime_ns != int(expected_modified):
+        raise CaptureManifestAnalysisError(
+            f"tap {tap_id} final artifact mtime changed after finalization; refuse stale hash reuse"
+        )
+
+
 def analyze_capture_manifest(
     manifest_path: str | Path,
     request: AnalysisRequest,
@@ -52,7 +78,10 @@ def analyze_capture_manifest(
     for entry in taps:
         if not isinstance(entry, dict):
             raise CaptureManifestAnalysisError("capture manifest tap entry must be an object")
-        tap_id = int(entry.get("tap_id"))
+        try:
+            tap_id = int(entry.get("tap_id"))
+        except (TypeError, ValueError) as exc:
+            raise CaptureManifestAnalysisError("capture manifest tap_id must be an integer") from exc
         if tap_id in seen:
             raise CaptureManifestAnalysisError(f"duplicate tap_id in capture manifest: {tap_id}")
         seen.add(tap_id)
@@ -62,12 +91,11 @@ def analyze_capture_manifest(
         if not isinstance(final, dict):
             raise CaptureManifestAnalysisError(f"tap {tap_id} has no finalized artifact")
         raw_path = final.get("path")
-        digest = final.get("sha256")
         if not isinstance(raw_path, str) or not raw_path:
             raise CaptureManifestAnalysisError(f"tap {tap_id} final artifact has no path")
-        if not isinstance(digest, str) or len(digest) != 64:
-            raise CaptureManifestAnalysisError(f"tap {tap_id} final artifact has no valid SHA-256")
+        digest = _validate_digest(final.get("sha256"), tap_id)
         artifact_path = _resolve_artifact_path(source, raw_path)
+        _reconcile_artifact_identity(artifact_path, final, tap_id)
         report = engine.analyze(
             artifact_path,
             request,
@@ -79,7 +107,7 @@ def analyze_capture_manifest(
                 "tap_id": tap_id,
                 "source_label": str(entry.get("source_label") or ""),
                 "artifact_path": str(artifact_path),
-                "content_sha256": digest.lower(),
+                "content_sha256": digest,
                 "analysis": report.to_dict(),
             }
         )
