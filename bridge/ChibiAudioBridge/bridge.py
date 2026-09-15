@@ -27,14 +27,14 @@ DEFAULT_MAIN_THREAD_STALL_COOLDOWN = 10
 DEFAULT_BROWSER_ROOTS = ("instruments", "audio_effects", "midi_effects", "drums", "samples", "sounds", "packs", "plugins", "user_library", "user_folders", "current_project")
 REMOTE_SCRIPT_RUNTIME_VERSION = "chibi-audio-bridge-0.2"
 BRIDGE_PROTOCOL_VERSION = "0.2"
-BRIDGE_POLICY_VERSION = "pilot-capture-1"
+BRIDGE_POLICY_VERSION = "pilot-capture-2"
 MODEL_READ_METHODS = (
     "bridge_status", "ping", "set_summary", "get", "children",
     "device_parameters", "clip_notes", "clip_warp_markers",
     "browser_capabilities", "browser_roots", "browser_search",
 )
 MODEL_BOUNDED_WRITE_METHODS = ("parameter_set",)
-MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_capture")
+MODEL_CAPTURE_METHODS = ("agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh")
 MODEL_EXPOSED_METHODS = MODEL_READ_METHODS + MODEL_BOUNDED_WRITE_METHODS + MODEL_CAPTURE_METHODS
 AGENT_AUDIO_TAP_HOST = "127.0.0.1"
 AGENT_AUDIO_TAP_PORT = 17654
@@ -911,6 +911,54 @@ class AbletonLiveMCP(ControlSurface):
         after = self._parameter_summary(capture)
         return {"device": {"id": device_id, "name": "ChibiTap"}, "before": before, "parameter": after, "enabled": enabled, "changed": after.get("value") != before.get("value")}
 
+
+    def _rpc_chibitap_refresh(self, params):
+        song = self.song()
+        track = song.master_track
+        devices = list(getattr(track, "devices", []))
+        matches = [i for i, device in enumerate(devices) if getattr(device, "name", "") == "ChibiTap"]
+        if len(matches) != 1:
+            raise RuntimeError("Expected exactly one ChibiTap on Main before refresh; found %s" % len(matches))
+        old_index = matches[0]
+        if old_index != len(devices) - 1:
+            raise RuntimeError("Refusing refresh: ChibiTap is not the final Main device")
+        old_device = devices[old_index]
+        old_device_id = self._object_id(old_device)
+        expected_id = params.get("expected_device_id")
+        if expected_id is not None and int(expected_id) != old_device_id:
+            raise RuntimeError("ChibiTap device identity changed since inspection; refusing refresh")
+        captures = [p for p in getattr(old_device, "parameters", []) if getattr(p, "name", "") == "Capture"]
+        if len(captures) != 1:
+            raise RuntimeError("Expected exactly one ChibiTap Capture parameter before refresh")
+        before = self._parameter_summary(captures[0])
+        expected = params.get("expected_capture_value")
+        if expected is None:
+            raise ValueError("expected_capture_value is required")
+        if abs(float(before.get("value")) - float(expected)) > 1e-6 or abs(float(before.get("value"))) > 1e-6:
+            raise RuntimeError("ChibiTap Capture must still be Off before refresh")
+        result = self._rpc_load_device({"name": "ChibiTap", "name_exact": True, "roots": ["plugins"], "target_track": {"id": self._object_id(track)}, "max_depth": 12, "max_visited": 40000})
+        if not result.get("loaded") or not (result.get("device") or {}).get("id"):
+            raise RuntimeError("Could not load a fresh ChibiTap from Live plugins")
+        new_id = int(result["device"]["id"])
+        latest = list(getattr(track, "devices", []))
+        new_matches = [i for i, device in enumerate(latest) if self._object_id(device) == new_id]
+        if len(new_matches) != 1:
+            raise RuntimeError("Fresh ChibiTap load could not be reconciled")
+        new_index = new_matches[0]
+        new_device = latest[new_index]
+        new_params = list(getattr(new_device, "parameters", []))
+        capture_new = [p for p in new_params if getattr(p, "name", "") == "Capture"]
+        tap_id_new = [p for p in new_params if getattr(p, "name", "") == "Tap ID"]
+        valid = new_index == len(latest) - 1 and len(capture_new) == 1 and len(tap_id_new) == 1
+        if not valid:
+            track.delete_device(new_index)
+            raise RuntimeError("Fresh ChibiTap failed Capture + Tap ID validation; rolled it back")
+        new_capture = self._parameter_summary(capture_new[0])
+        if abs(float(new_capture.get("value"))) > 1e-6:
+            track.delete_device(new_index)
+            raise RuntimeError("Fresh ChibiTap Capture was not Off; rolled it back")
+        track.delete_device(old_index)
+        return {"refreshed": True, "old_device_id": old_device_id, "device": {"id": new_id, "name": "ChibiTap"}, "capture": new_capture, "tap_id": self._parameter_summary(tap_id_new[0])}
 
     def _rpc_capture_transport(self, params):
         action = params.get("action") or "status"
@@ -2396,5 +2444,109 @@ class AbletonLiveMCP(ControlSurface):
         except Exception:
             return None
 
+
+    def _chibitap_target_track(self, params):
+        placement = params.get("placement") or "master"
+        if placement == "master":
+            return self.song().master_track, {"path": "song master_track"}
+        if placement != "track":
+            raise ValueError("placement must be master or track")
+        index = params.get("track_index")
+        if index is None:
+            raise ValueError("track_index is required for placement=track")
+        index = int(index)
+        tracks = list(self.song().tracks)
+        if index < 0 or index >= len(tracks):
+            raise IndexError("track_index is out of range")
+        track = tracks[index]
+        expected_name = params.get("expected_track_name")
+        if not expected_name or getattr(track, "name", "") != expected_name:
+            raise RuntimeError("ChibiTap target track identity mismatch")
+        return track, {"path": "song tracks %s" % index}
+
+    def _chibitap_parameter_map(self, device):
+        return dict((getattr(parameter, "name", ""), parameter) for parameter in getattr(device, "parameters", []))
+
+    def _rpc_chibitap_setup(self, params):
+        track, track_ref = self._chibitap_target_track(params)
+        devices = list(getattr(track, "devices", []))
+        matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
+        if len(matches) > 1:
+            raise RuntimeError("Expected at most one ChibiTap on target track; found %s" % len(matches))
+        loaded = False
+        if not matches:
+            result = self._rpc_load_device({"name": "ChibiTap", "name_exact": True, "roots": ["plugins"], "target_track": track_ref, "max_depth": 12, "max_visited": 20000})
+            if result.get("ambiguous"):
+                raise RuntimeError("ChibiTap browser lookup was ambiguous")
+            loaded = bool(result.get("loaded"))
+            devices = list(getattr(track, "devices", []))
+            matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
+        if len(matches) != 1:
+            raise RuntimeError("Expected exactly one ChibiTap after setup; found %s" % len(matches))
+        device = matches[0]
+        if devices[-1] is not device:
+            raise RuntimeError("ChibiTap must be the final device on its target track")
+        pmap = self._chibitap_parameter_map(device)
+        if "Capture" not in pmap or "Tap ID" not in pmap:
+            raise RuntimeError("ChibiTap does not expose the required 0.2.0 Capture + Tap ID layout")
+        capture_summary = self._parameter_summary(pmap["Capture"])
+        if abs(float(capture_summary.get("value"))) > 1e-6:
+            raise RuntimeError("ChibiTap Capture must be Off after setup")
+        return {"loaded": loaded, "track": {"id": self._object_id(track), "name": getattr(track, "name", "")}, "device": {"id": self._object_id(device), "name": "ChibiTap"}, "parameters": {"Capture": capture_summary, "Tap ID": self._parameter_summary(pmap["Tap ID"]), "tap_id_integer": int(round(float(getattr(pmap["Tap ID"], "value", 0.0)) * 9999.0))}}
+
+    def _rpc_chibitap_configure(self, params):
+        track, _track_ref = self._chibitap_target_track(params)
+        devices = list(getattr(track, "devices", []))
+        matches = [device for device in devices if getattr(device, "name", "") == "ChibiTap"]
+        if len(matches) != 1:
+            raise RuntimeError("Expected exactly one ChibiTap on target track; found %s" % len(matches))
+        device = matches[0]
+        if devices[-1] is not device:
+            raise RuntimeError("ChibiTap must be the final device on its target track")
+        device_id = self._object_id(device)
+        expected_device_id = params.get("expected_device_id")
+        if expected_device_id is None or int(expected_device_id) != device_id:
+            raise RuntimeError("ChibiTap device identity changed since inspection; refusing configure")
+        pmap = self._chibitap_parameter_map(device)
+        if "Capture" not in pmap or "Tap ID" not in pmap:
+            raise RuntimeError("ChibiTap does not expose the required 0.2.0 Capture + Tap ID layout")
+        capture = pmap["Capture"]
+        tap = pmap["Tap ID"]
+        before_capture = self._parameter_summary(capture)
+        before_tap = self._parameter_summary(tap)
+        changed = False
+        if params.get("tap_id") is not None:
+            requested = int(params.get("tap_id"))
+            expected = params.get("expected_tap_id")
+            expected_capture_enabled = params.get("expected_capture_enabled")
+            if expected is None:
+                raise ValueError("expected_tap_id is required when changing tap_id")
+            if expected_capture_enabled is not False:
+                raise ValueError("changing tap_id requires expected_capture_enabled=false")
+            if float(before_capture.get("value")) >= 0.5:
+                raise RuntimeError("ChibiTap Capture must be Off before changing Tap ID")
+            if requested < 0 or requested > 9999:
+                raise ValueError("tap_id must be between 0 and 9999")
+            current = int(round(float(before_tap.get("value")) * 9999.0))
+            if current != int(expected):
+                raise RuntimeError("ChibiTap Tap ID changed since inspection; refusing configure")
+            tap.value = float(requested) / 9999.0
+            applied = int(round(float(getattr(tap, "value", 0.0)) * 9999.0))
+            if applied != requested:
+                raise RuntimeError("ChibiTap Tap ID did not settle on the requested integer")
+            changed = changed or requested != current
+        if params.get("capture_enabled") is not None:
+            enabled = params.get("capture_enabled")
+            expected_enabled = params.get("expected_capture_enabled")
+            if type(enabled) is not bool or type(expected_enabled) is not bool:
+                raise ValueError("capture_enabled and expected_capture_enabled must be booleans")
+            current_enabled = float(before_capture.get("value")) >= 0.5
+            if current_enabled != expected_enabled:
+                raise RuntimeError("ChibiTap Capture changed since inspection; refusing configure")
+            capture.value = 1.0 if enabled else 0.0
+            changed = changed or enabled != current_enabled
+        after_capture = self._parameter_summary(capture)
+        after_tap = self._parameter_summary(tap)
+        return {"track": {"id": self._object_id(track), "name": getattr(track, "name", "")}, "device": {"id": device_id, "name": "ChibiTap"}, "before": {"Capture": before_capture, "Tap ID": before_tap}, "parameters": {"Capture": after_capture, "Tap ID": after_tap, "tap_id_integer": int(round(float(after_tap.get("value")) * 9999.0))}, "changed": changed}
 
 AbletonObjectMCP = AbletonLiveMCP

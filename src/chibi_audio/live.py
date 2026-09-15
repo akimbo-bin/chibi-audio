@@ -19,7 +19,7 @@ READ_ONLY_METHODS = frozenset(
         "browser_search",
     }
 )
-CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_capture"})
+CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture"})
 BOUNDED_WRITE_METHODS = frozenset({"parameter_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
@@ -169,6 +169,74 @@ class LiveCaptureClient(_LiveTransport):
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
         return self._request("capture_probe_refresh", params)
+
+
+    def setup_chibitap(
+        self,
+        *,
+        placement: str = "master",
+        track_index: int | None = None,
+        expected_track_name: str | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if placement not in {"master", "track"}:
+            raise LiveBridgeError("placement must be master or track")
+        if placement == "track" and (track_index is None or not expected_track_name):
+            raise LiveBridgeError("track placement requires track_index and expected_track_name")
+        if verify_capability:
+            self._require_method("capture", "chibitap_setup")
+        params: dict[str, Any] = {"placement": placement}
+        if track_index is not None:
+            params["track_index"] = int(track_index)
+        if expected_track_name is not None:
+            params["expected_track_name"] = expected_track_name
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("chibitap_setup", params)
+
+    def configure_chibitap(
+        self,
+        *,
+        expected_device_id: int,
+        placement: str = "master",
+        track_index: int | None = None,
+        expected_track_name: str | None = None,
+        tap_id: int | None = None,
+        expected_tap_id: int | None = None,
+        capture_enabled: bool | None = None,
+        expected_capture_enabled: bool | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if placement not in {"master", "track"}:
+            raise LiveBridgeError("placement must be master or track")
+        if placement == "track" and (track_index is None or not expected_track_name):
+            raise LiveBridgeError("track placement requires track_index and expected_track_name")
+        if tap_id is None and capture_enabled is None:
+            raise LiveBridgeError("configure_chibitap requires tap_id and/or capture_enabled")
+        if tap_id is not None and expected_tap_id is None:
+            raise LiveBridgeError("expected_tap_id is required when changing tap_id")
+        if capture_enabled is not None and expected_capture_enabled is None:
+            raise LiveBridgeError("expected_capture_enabled is required when changing capture_enabled")
+        if verify_capability:
+            self._require_method("capture", "chibitap_configure")
+        params: dict[str, Any] = {"placement": placement, "expected_device_id": int(expected_device_id)}
+        if track_index is not None:
+            params["track_index"] = int(track_index)
+        if expected_track_name is not None:
+            params["expected_track_name"] = expected_track_name
+        if tap_id is not None:
+            params["tap_id"] = int(tap_id)
+            params["expected_tap_id"] = int(expected_tap_id)
+        if capture_enabled is not None:
+            if type(capture_enabled) is not bool or type(expected_capture_enabled) is not bool:
+                raise LiveBridgeError("capture_enabled and expected_capture_enabled must be booleans")
+            params["capture_enabled"] = capture_enabled
+            params["expected_capture_enabled"] = expected_capture_enabled
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return self._request("chibitap_configure", params)
 
 
     def set_chibitap_capture(

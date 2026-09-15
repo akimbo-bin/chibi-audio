@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <JuceHeader.h>
 #include <atomic>
@@ -22,6 +22,8 @@ public:
     void setInstanceId(juce::String newInstanceId);
     juce::String getInstanceId() const;
     juce::File getLastCaptureFile() const;
+    void setTapId(int newTapId) noexcept { tapId.store(juce::jlimit(0, 9999, newTapId), std::memory_order_release); }
+    int getTapId() const noexcept { return tapId.load(std::memory_order_acquire); }
     uint64_t getDroppedBlocks() const noexcept { return droppedBlocks.load(std::memory_order_acquire); }
 
 private:
@@ -39,6 +41,7 @@ private:
     std::atomic<bool> recording { false };
     std::atomic<double> currentSampleRate { 48000.0 };
     std::atomic<int> currentChannels { 2 };
+    std::atomic<int> tapId { 0 };
     std::atomic<uint64_t> droppedBlocks { 0 };
 
     juce::TimeSliceThread diskThread { "ChibiTap Disk Writer" };

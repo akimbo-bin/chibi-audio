@@ -137,6 +137,20 @@ The same typed sequence was repeated over an active range of the soloed Serum tr
 
 This is not a new mix verdict because the Set was intentionally left in its existing solo state. It is infrastructure proof that real Ableton audio can be captured and analyzed without the Export dialog.
 
+### ChibiTap 0.2.0 multi-tap proof
+
+The next proof moved to the active `KISSKISSKISS Mix - Chibi.als` lab lineage. Typed `chibitap_setup` / `chibitap_configure` placed final transparent taps at Main, BASS and DRUMS and assigned durable Tap IDs **1 / 2 / 3**. ChibiTap 0.2.0 may be armed while stopped but writes only while the host playhead reports playback.
+
+An initial three-tap pass over beats 68-84 produced equal-length files but BASS/DRUMS silence. Structured Arrangement inspection showed the important house bass/drum layers do not begin until about beat 96, so this was a window-selection control rather than a capture failure.
+
+Repeating the same typed three-tap operation over an active house-drop window beginning at beat 100 produced three real 48 kHz stereo IEEE-float WAVs. All three were exactly **249,856 samples / 5.205333 s**, proving block/sample-count alignment across independent plugin instances during one Live playback pass. Measured evidence from that pass included approximately:
+
+- Main / Tap 1: **-8.34 LUFS**, **-1.0 dBTP**;
+- BASS / Tap 2: **-14.97 LUFS**, **+0.88 dBTP** pre-master;
+- DRUMS / Tap 3: **-10.76 LUFS**, **+3.24 dBTP** pre-master.
+
+The requested window was beats 100-108, but the external coordinator did not issue transport stop until about beat **111.63**. The three files stayed perfectly equal in sample count, so multi-tap alignment is proven; exact requested **end-boundary finality** is not.
+
 ### Remaining boundary
 
-The current capture sequence arms before playback and disarms after transport stop, so artifacts contain lead/tail around the requested musical range. The next audio-plane milestone is sample-aligned multi-tap capture: pre-arm writers, gate sample writes against one shared host timeline/range, map durable tap instance identity to Main/BASS/DRUMS/source tracks, and capture those signal points during one playback pass.
+Host-play gating now excludes stopped-state buffers and Tap IDs provide durable source identity. The remaining audio-plane milestone is exact requested-range finality: terminate or crop capture on the requested host beat/sample boundary rather than after an externally polled transport stop, then package the aligned artifacts, timing evidence, fingerprints and analysis into one experiment manifest.

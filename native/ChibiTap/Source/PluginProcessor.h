@@ -34,6 +34,7 @@ public:
 
 private:
     juce::AudioParameterBool* captureParameter = nullptr;
+    juce::AudioParameterInt* tapIdParameter = nullptr;
     juce::String instanceId;
     CaptureWriter captureWriter;
 
