@@ -1,4 +1,4 @@
-import json
+﻿import json
 from pathlib import Path
 
 import pytest
@@ -154,6 +154,18 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
 
     FakeCaptureClient.instances.clear()
     reader = FakeReadClient()
+    reader.summary["tracks"][0]["mute"] = False
+    reader.summary["tracks"][0]["solo"] = False
+    reader.summary["tracks"].append(
+        {
+            "id": 300,
+            "index": 51,
+            "name": "52-Serum 2",
+            "mute": False,
+            "solo": True,
+            "devices": [],
+        }
+    )
     monkeypatch.setattr(session, "LiveBridgeClient", lambda **_kwargs: reader)
     monkeypatch.setattr(session, "LiveCaptureClient", FakeCaptureClient)
     monkeypatch.setattr(session.time, "sleep", lambda _seconds: None)
@@ -204,6 +216,16 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
     assert manifest["live_session"]["set_signature"] == "sig-1"
     assert [item["tap_id"] for item in manifest["live_session"]["tap_mapping"]] == [1, 2]
     assert manifest["live_session"]["song"]["file_path"] == "C:/test/Test Set.als"
+    mixer_state = manifest["live_session"]["mixer_state"]
+    assert [item["name"] for item in mixer_state["active_solos"]] == ["52-Serum 2"]
+    assert mixer_state["active_solo_count"] == 1
+    assert mixer_state["tap_targets"][0]["solo_suppression_risk"] is False
+    assert mixer_state["tap_targets"][1]["solo_suppression_risk"] is True
+    assert [item["track_name"] for item in mixer_state["tap_targets"]] == ["Main", "BASS"]
+    assert mixer_state["tap_targets"][1]["mute"] is False
+    assert mixer_state["tap_targets"][1]["solo"] is False
+    assert any("active solo" in warning.lower() for warning in mixer_state["warnings"])
+    assert any("BASS" in warning and "suppressed" in warning for warning in mixer_state["warnings"])
     assert finalized["transport_start_beat"] == 0.0
     assert finalized["transport_stop_beat"] == 1.0
     assert [item.tap_id for item in finalized["inputs"]] == [1, 2]
