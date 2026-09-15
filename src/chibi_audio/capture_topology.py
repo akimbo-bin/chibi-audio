@@ -138,6 +138,24 @@ def _current_signature(read_client: LiveBridgeClient) -> tuple[dict[str, Any], s
     return summary, _set_signature(summary)
 
 
+def _observed_tap_id(read_client: LiveBridgeClient, device_id: int) -> tuple[int, bool]:
+    parameters = read_client.call(
+        "device_parameters",
+        {"ref": {"id": int(device_id)}, "limit": 16},
+    )
+    by_name = {str(item.get("name")): item for item in parameters}
+    capture = by_name.get("Capture")
+    tap_id = by_name.get("Tap ID")
+    if capture is None or tap_id is None:
+        raise CaptureError(f"ChibiTap device {device_id} no longer exposes Capture + Tap ID")
+    if float(capture.get("value", 0.0)) >= 0.5:
+        return -1, True
+    try:
+        return int(str(tap_id.get("display", "")).strip()), False
+    except ValueError as exc:
+        raise CaptureError(f"ChibiTap device {device_id} Tap ID is unreadable during restore") from exc
+
+
 def prepare_capture_topology(
     taps: Iterable[CaptureSessionTap],
     *,
@@ -256,7 +274,7 @@ def _restore_prepared_taps(
     remove_created: bool,
     expected_initial_signature: str | None,
 ) -> dict[str, Any]:
-    summary, current_signature = _current_signature(read_client)
+    _summary, current_signature = _current_signature(read_client)
     if expected_initial_signature is not None and current_signature != expected_initial_signature:
         raise CaptureError(
             "Live Set changed since topology preparation; refusing restore before any ChibiTap cleanup effect"
@@ -288,14 +306,33 @@ def _restore_prepared_taps(
                     "device_id": tap.device_id,
                     "signal_point": tap.signal_point,
                 })
-                summary, current_signature = _current_signature(read_client)
+                _summary, current_signature = _current_signature(read_client)
                 continue
-            if (not tap.created) and tap.tap_id_changed:
+            if not tap.created and tap.prior_tap_id != tap.tap_id:
+                observed_tap_id, capture_on = _observed_tap_id(read_client, tap.device_id)
+                if capture_on:
+                    raise CaptureError(
+                        f"ChibiTap device {tap.device_id} Capture is On; refusing Tap ID restore"
+                    )
+                if observed_tap_id == tap.prior_tap_id:
+                    actions.append({
+                        "action": "already_restored_tap_id",
+                        "tap_id": tap.tap_id,
+                        "restored_tap_id": tap.prior_tap_id,
+                        "device_id": tap.device_id,
+                        "signal_point": tap.signal_point,
+                    })
+                    continue
+                if observed_tap_id != tap.tap_id:
+                    raise CaptureError(
+                        f"ChibiTap device {tap.device_id} Tap ID changed unexpectedly during restore: "
+                        f"observed {observed_tap_id}, expected {tap.tap_id} or {tap.prior_tap_id}"
+                    )
                 capture_client.configure_chibitap(
                     **target_kwargs,
                     expected_device_id=tap.device_id,
                     tap_id=tap.prior_tap_id,
-                    expected_tap_id=tap.tap_id,
+                    expected_tap_id=observed_tap_id,
                     expected_capture_enabled=False,
                     expected_set_signature=current_signature,
                 )
@@ -306,10 +343,10 @@ def _restore_prepared_taps(
                     "device_id": tap.device_id,
                     "signal_point": tap.signal_point,
                 })
-                summary, current_signature = _current_signature(read_client)
+                _summary, current_signature = _current_signature(read_client)
         except Exception as exc:  # noqa: BLE001 - attempt remaining exact cleanup steps.
             errors.append(f"Tap {tap.tap_id} / device {tap.device_id}: {exc}")
-            summary, current_signature = _current_signature(read_client)
+            _summary, current_signature = _current_signature(read_client)
 
     if errors:
         raise CaptureError("capture topology restore was incomplete: " + "; ".join(errors))
