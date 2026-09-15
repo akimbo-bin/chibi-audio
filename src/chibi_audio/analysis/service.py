@@ -12,6 +12,7 @@ from .io import AnalysisContext
 from .librosa_adapter import LibrosaMirAnalyzer
 from .loudness import FfmpegLoudnessAnalyzer
 from .models import SCHEMA_VERSION, AnalysisReport, AnalysisRequest, AnalyzerDescriptor
+from .production import production_analyzers
 
 
 class AnalysisUnavailable(ValueError):
@@ -36,6 +37,7 @@ class AnalyzerRegistry:
         return cls(
             (
                 *default_core_analyzers(),
+                *production_analyzers(),
                 FfmpegLoudnessAnalyzer(),
                 LibrosaMirAnalyzer(),
             )

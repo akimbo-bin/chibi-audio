@@ -25,14 +25,76 @@ def librosa_descriptor() -> AnalyzerDescriptor:
     return AnalyzerDescriptor(
         name="librosa_mir",
         version=version,
-        capabilities=frozenset({AnalysisCapability.MIR_ONSETS, AnalysisCapability.MIR_TONAL}),
+        capabilities=frozenset(
+            {
+                AnalysisCapability.MIR_ONSETS,
+                AnalysisCapability.MIR_TONAL,
+                AnalysisCapability.MIR_STRUCTURE,
+            }
+        ),
         cost=AnalysisCost.MODERATE,
-        implementation="librosa onset envelope / tempo / chroma-STFT evidence",
+        implementation="librosa onset / tempo / chroma / bounded novelty evidence",
         upstream="librosa/librosa",
         license="ISC",
         available=available,
         unavailable_reason=reason,
     )
+
+
+def _structure_boundaries(librosa, np, mono, sr: int, absolute_start: float) -> dict[str, Any]:
+    hop_length = 512
+    mel = librosa.feature.melspectrogram(
+        y=mono,
+        sr=sr,
+        n_fft=2048,
+        hop_length=hop_length,
+        n_mels=48,
+        power=2.0,
+    )
+    if mel.size == 0 or mel.shape[1] < 2:
+        return {
+            "boundary_candidates_seconds": [],
+            "boundary_candidate_strength": [],
+            "novelty_median": 0.0,
+            "novelty_p95": 0.0,
+            "method": "log-mel frame-difference novelty",
+        }
+
+    log_mel = librosa.power_to_db(mel, ref=np.max)
+    novelty = np.linalg.norm(np.diff(log_mel, axis=1), axis=0)
+    if novelty.size >= 5:
+        novelty = np.convolve(novelty, np.ones(5, dtype=np.float64) / 5.0, mode="same")
+
+    median = float(np.median(novelty))
+    p95 = float(np.percentile(novelty, 95))
+    if not np.any(novelty > 0.0):
+        candidate_indices: list[int] = []
+    else:
+        local_maxima = []
+        for index in range(1, max(1, len(novelty) - 1)):
+            if novelty[index] >= novelty[index - 1] and novelty[index] > novelty[index + 1]:
+                local_maxima.append(index)
+        threshold = max(p95, median)
+        local_maxima = [index for index in local_maxima if float(novelty[index]) >= threshold]
+        minimum_gap_frames = max(1, round(1.5 * sr / hop_length))
+        chosen: list[int] = []
+        for index in sorted(local_maxima, key=lambda value: float(novelty[value]), reverse=True):
+            if all(abs(index - existing) >= minimum_gap_frames for existing in chosen):
+                chosen.append(index)
+            if len(chosen) >= 12:
+                break
+        candidate_indices = sorted(chosen)
+
+    frame_numbers = np.asarray([index + 1 for index in candidate_indices], dtype=np.int64)
+    times = librosa.frames_to_time(frame_numbers, sr=sr, hop_length=hop_length)
+    strengths = [float(novelty[index]) for index in candidate_indices]
+    return {
+        "boundary_candidates_seconds": [absolute_start + float(value) for value in times],
+        "boundary_candidate_strength": strengths,
+        "novelty_median": median,
+        "novelty_p95": p95,
+        "method": "log-mel frame-difference novelty",
+    }
 
 
 class LibrosaMirAnalyzer:
@@ -53,8 +115,10 @@ class LibrosaMirAnalyzer:
         result: dict[str, Any] = {}
 
         onset_envelope = None
-        if AnalysisCapability.MIR_ONSETS in requested:
+        if AnalysisCapability.MIR_ONSETS in requested or AnalysisCapability.MIR_STRUCTURE in requested:
             onset_envelope = librosa.onset.onset_strength(y=mono, sr=sr)
+
+        if AnalysisCapability.MIR_ONSETS in requested:
             onset_frames = librosa.onset.onset_detect(
                 onset_envelope=onset_envelope,
                 sr=sr,
@@ -90,6 +154,38 @@ class LibrosaMirAnalyzer:
                 ),
                 "tonal_concentration": float(np.max(normalized)) if total > 0 else None,
                 "interpretation_note": "dominant pitch class is evidence only; this analyzer does not claim musical key",
+            }
+
+        if AnalysisCapability.MIR_STRUCTURE in requested:
+            novelty = _structure_boundaries(
+                librosa,
+                np,
+                mono,
+                sr,
+                context.absolute_start_seconds,
+            )
+            local_tempo = librosa.feature.tempo(
+                onset_envelope=onset_envelope,
+                sr=sr,
+                aggregate=None,
+            )
+            local_tempo = np.asarray(local_tempo, dtype=np.float64)
+            finite_tempo = local_tempo[np.isfinite(local_tempo) & (local_tempo > 0.0)]
+            if finite_tempo.size:
+                tempo_summary = {
+                    "median_bpm": float(np.median(finite_tempo)),
+                    "p10_bpm": float(np.percentile(finite_tempo, 10)),
+                    "p90_bpm": float(np.percentile(finite_tempo, 90)),
+                }
+            else:
+                tempo_summary = {"median_bpm": None, "p10_bpm": None, "p90_bpm": None}
+            result[AnalysisCapability.MIR_STRUCTURE.value] = {
+                **novelty,
+                "local_tempo_evidence": tempo_summary,
+                "interpretation_note": (
+                    "boundary candidates are signal-derived change points, not functional labels; "
+                    "artist-authored Ableton Locators remain authoritative song structure metadata"
+                ),
             }
 
         return result

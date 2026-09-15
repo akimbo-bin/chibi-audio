@@ -14,9 +14,13 @@ class AnalysisCapability(StrEnum):
     ACTIVITY = "audio.activity"
     STEREO = "audio.stereo"
     SPECTRUM = "audio.spectrum"
+    TRANSIENTS = "audio.transients"
+    TEXTURE = "audio.texture"
+    STEREO_BANDS = "audio.stereo.bands"
     LOUDNESS = "audio.loudness"
     MIR_ONSETS = "audio.mir.onsets"
     MIR_TONAL = "audio.mir.tonal"
+    MIR_STRUCTURE = "audio.mir.structure"
 
 
 class AnalysisCost(StrEnum):
