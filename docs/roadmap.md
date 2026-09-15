@@ -136,6 +136,83 @@ Audio embeddings or audio-language models may be used as weak semantic sensors f
 Record predictions against later real listening checks (phone, car, headphones, etc.) so each sensor can be calibrated. Retire or down-weight sensors that do not predict useful outcomes.
 
 **Acceptance:** on KISSKISSKISS, Chibi can (1) identify which source(s) dominate a known harsh/crispy passage and whether the problem is source or downstream processing, (2) explain which bass harmonics remain audible under a phone-like profile and what masks them, and (3) make at least one playback-translation prediction that is checked against a real listening test. The output must remain an evidence-backed hypothesis for the artist, not an autonomous declaration that a mix `sounds good`.
+## R5.75 - Iterative loud mix/master optimizer - TARGET
+Tracked by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4).
+
+Support a goal-level request such as:
+
+> "I want to mix and master this track to be loud."
+
+Chibi should be able to pursue that goal through **bounded waves of reversible Live Set changes, authoritative renders, analysis and adaptation** rather than one-shot plugin advice or a scalar LUFS target.
+
+### Goal contract
+Before the loop begins, establish a target bundle and constraints from the user, references and current Set. The bundle may include:
+- desired competitive loudness range by musical section;
+- true-peak/delivery constraints;
+- transient/crest preservation;
+- low-frequency punch and envelope integrity;
+- allowed versus unacceptable clipping/saturation character;
+- spectral/harshness/roughness guardrails;
+- stereo/mono constraints;
+- reference-relative targets;
+- playback-translation requirements.
+
+Do **not** collapse the objective into one master quality score. Prefer explicit guardrails plus a best-so-far/Pareto comparison: louder is useful only while the other important dimensions remain acceptable.
+
+### Loudness efficiency / distortion-tax analysis
+Add a controlled master-drive sweep over a representative section and measure the **clean-loudness knee**: where another dB of drive stops buying useful loudness and increasingly buys crest collapse, bass flattening, pumping, roughness, clipping or cross-band distortion.
+
+Useful evidence includes:
+- marginal LU gained per dB of additional drive;
+- full-band and band-limited crest-factor loss;
+- transient retention;
+- low-frequency waveform/envelope deformation;
+- near-clipped/clipped event statistics;
+- inferred time-varying master gain from aligned premaster -> master captures;
+- sharpness/roughness changes;
+- stereo change;
+- event-synchronous upper-band fizz/roughness during kick/bass peaks.
+
+Compare the curve and knee with user references by equivalent musical section when possible. A reference is evidence about what is achievable, not a spectral/LUFS target to clone blindly.
+
+### Iteration wave
+Each optimization wave should:
+1. observe the current best Set/render and fresh evidence;
+2. rank a small number of causal hypotheses from R5/R5.5;
+3. choose one coherent bounded intervention with expected benefit and risk;
+4. checkpoint the exact current state;
+5. apply the mutation through the typed Live path and read it back;
+6. render authoritatively through Live;
+7. analyze both **level-matched** and **as-produced** comparisons;
+8. keep the candidate only if it improves the goal without violating guardrails; otherwise roll back exactly;
+9. update the evidence and choose the next wave rather than blindly repeating the same strategy.
+
+Candidate interventions may include source trims, envelope changes, dynamic low-band space, local transient clipping, track/bus compression, clipper/limiter changes, targeted harshness control or other already-proven bounded operations. Prefer upstream/distributed peak control when it achieves the same loudness with lower full-mix damage.
+
+### Stop conditions
+The loop must stop truthfully when any of these becomes true:
+- the target bundle is satisfied within tolerance;
+- no tested candidate improves the best-so-far result without unacceptable degradation;
+- distortion/translation/crest/stereo guardrails regress beyond bounds;
+- causal attribution becomes too ambiguous to justify another automatic change;
+- the authorized render/mutation budget is exhausted;
+- the next useful step is materially subjective or higher-risk and needs artist approval.
+
+"Until happy" therefore means **until the measurable goal contract is satisfied or further automatic optimization is no longer justified**. Final artistic acceptance still belongs to the artist.
+
+### Result package
+Return:
+- baseline render;
+- best-so-far render;
+- level-matched A/B;
+- as-produced A/B;
+- exact accepted changes;
+- rejected experiments and why they lost;
+- loudness-efficiency curve / clean-loudness knee;
+- remaining tradeoffs and confidence;
+- full reversible experiment provenance.
+
+**Acceptance:** on KISSKISSKISS, a user can request a loud mix/master goal and Chibi completes at least two autonomous experiment waves on the lab Set with authoritative renders between waves. It identifies a clean-loudness knee and at least one upstream loudness bottleneck, preserves a best-so-far state, and either (a) produces a measurably louder render at comparable or better distortion/translation quality, or (b) stops with concrete evidence that further loudness costs unacceptable quality.
 ## R6 - Plugin intelligence only as demanded by the pilot
 Normalize duplicate plugin formats into logical products and improve intent categories. Add manuals/parameter semantics only for plugins we actually need to operate.
 **Acceptance:** requests such as "what transparent clippers do I own?" or "which installed tool can dynamically create space here?" return grounded candidates from the machine inventory.
@@ -150,7 +227,8 @@ Expand the proven experiment loop to:
 - per-section automation;
 - optional offline plugin-chain experiments;
 - optional audio-rate telemetry via a small Max for Live tap;
-- perceptual/audibility/translation evidence proven in R5.5.
+- perceptual/audibility/translation evidence proven in R5.5;
+- general goal-driven iterative optimization loops derived from the bounded R5.75 loudness workflow.
 ## R9 - Chibi / Ultron integration
 Expose proven capabilities to Chibi Core as a specialist production executor. Preserve Core as the only workflow authority and preserve artist approval for subjective material changes by default.
 ## Scope guard
