@@ -6,7 +6,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from .analysis_bridge import AnalysisFabricBridge
-from .analysis_mcp import register_analysis_tools
+from .analysis_mcp import AnalysisCapabilityList, AnalysisCostName, register_analysis_tools
 from .capture import _safe_id
 from .capture_session import parse_session_tap, run_capture_session
 from .facade import ChibiAudioFacade
@@ -144,6 +144,46 @@ def build_mcp_server(
                 occurrence=occurrence,
                 tap_specs=tap_specs,
             )
+        except Exception as exc:  # noqa: BLE001
+            raise _safe_tool_error(exc) from None
+
+    @server.tool(
+        title="Plan evidence for one named song section",
+        description=(
+            "Resolve an artist-authored locator section, validate the requested reusable analyzers/cost ceiling, "
+            "and return the exact future capture + analysis plan without causing any Live effects."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def plan_section_evidence(
+        name: ObjectName,
+        capabilities: AnalysisCapabilityList,
+        tap_specs: TapSpecList = [],
+        max_cost: AnalysisCostName = "MODERATE",
+        occurrence: SectionOccurrence | None = None,
+        limit: LocatorLimit = 256,
+    ) -> dict[str, Any]:
+        try:
+            capture_plan = build_section_capture_plan(
+                fresh_sections(limit),
+                name,
+                occurrence=occurrence,
+                tap_specs=tap_specs,
+            )
+            analysis_plan = analysis.plan_request(capabilities, max_cost=max_cost)
+            return {
+                "effect_state": "NOT_STARTED",
+                "set_signature": capture_plan.get("set_signature"),
+                "section": capture_plan["section"],
+                "capture_request": capture_plan["capture_request"],
+                "analysis_plan": analysis_plan,
+                "ready_to_execute": bool(capture_plan.get("ready_to_execute")),
+                "execution_note": (
+                    "Capture remains a separate explicitly authorized effect. After finalization, pass its manifest "
+                    "to the read-only analysis fabric with this validated capability/cost plan."
+                ),
+            }
         except Exception as exc:  # noqa: BLE001
             raise _safe_tool_error(exc) from None
 

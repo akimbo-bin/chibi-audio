@@ -42,6 +42,27 @@ class AnalysisFabricBridge:
             "analyzers": service.capability_report(),
         }
 
+    def plan_request(
+        self,
+        capabilities: Iterable[str],
+        *,
+        max_cost: str = "CHEAP",
+    ) -> dict[str, Any]:
+        """Validate one analysis request without opening or decoding audio."""
+        module = self._require_module()
+        request = self._request(module, capabilities, max_cost=max_cost)
+        service = module.AudioAnalysisService()
+        selected = service.registry.plan(request)
+        requested = sorted(getattr(value, "value", str(value)) for value in request.capabilities)
+        cost = getattr(request.max_cost, "value", str(request.max_cost))
+        return {
+            "available": True,
+            "schema_version": getattr(module, "SCHEMA_VERSION", None),
+            "requested_capabilities": requested,
+            "max_cost": cost,
+            "selected_analyzers": [analyzer.descriptor.to_dict() for analyzer in selected],
+        }
+
     def analyze_audio(
         self,
         artifact: str,

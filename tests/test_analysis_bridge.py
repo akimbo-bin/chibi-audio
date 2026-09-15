@@ -9,6 +9,8 @@ from chibi_audio.analysis_bridge import AnalysisFabricBridge, AnalysisFabricUnav
 class FakeRequest:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.capabilities = kwargs.get("capabilities", frozenset())
+        self.max_cost = kwargs.get("max_cost", "CHEAP")
 
 
 class FakeReport:
@@ -19,8 +21,25 @@ class FakeReport:
         return dict(self.payload)
 
 
+class FakeDescriptor:
+    def to_dict(self):
+        return {"name": "fake", "capabilities": ["audio.levels"], "cost": "CHEAP"}
+
+
+class FakeAnalyzer:
+    descriptor = FakeDescriptor()
+
+
+class FakeRegistry:
+    def plan(self, request):
+        return (FakeAnalyzer(),)
+
+
 class FakeService:
     last_request = None
+
+    def __init__(self):
+        self.registry = FakeRegistry()
 
     def capability_report(self):
         return [{"name": "fake", "capabilities": ["audio.levels"], "cost": "CHEAP"}]
@@ -161,3 +180,15 @@ def test_missing_analysis_fabric_fails_closed(monkeypatch, tmp_path):
     assert catalog["analyzers"] == []
     with pytest.raises(AnalysisFabricUnavailable, match="unavailable"):
         bridge.analyze_audio("anything.wav", ["audio.levels"])
+
+
+def test_plan_request_validates_analyzers_without_opening_audio(tmp_path):
+    module, _calls = make_module()
+    bridge = AnalysisFabricBridge(tmp_path, module=module)
+    FakeService.last_request = None
+    result = bridge.plan_request(["audio.levels"], max_cost="moderate")
+    assert result["available"] is True
+    assert result["requested_capabilities"] == ["audio.levels"]
+    assert result["max_cost"] == "MODERATE"
+    assert result["selected_analyzers"][0]["name"] == "fake"
+    assert FakeService.last_request is None

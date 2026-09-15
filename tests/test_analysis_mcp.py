@@ -36,6 +36,15 @@ class FakeAnalysisBridge:
         self.calls.append(("list",))
         return {"available": True, "analyzers": [{"name": "fake"}]}
 
+    def plan_request(self, capabilities, **kwargs):
+        self.calls.append(("plan", tuple(capabilities), kwargs))
+        return {
+            "available": True,
+            "requested_capabilities": list(capabilities),
+            "max_cost": kwargs.get("max_cost", "CHEAP"),
+            "selected_analyzers": [{"name": "fake"}],
+        }
+
     def analyze_audio(self, artifact, capabilities, **kwargs):
         self.calls.append(("audio", artifact, tuple(capabilities), kwargs))
         return {"artifact": artifact, "requested_capabilities": list(capabilities)}
@@ -72,6 +81,7 @@ def test_analysis_tools_are_present_and_read_only(tmp_path):
         "analyze_audio",
         "analyze_capture_manifest",
         "compare_analysis_reports",
+        "plan_section_evidence",
     ):
         assert name in catalog
         assert catalog[name].annotations.read_only_hint is True
@@ -143,3 +153,30 @@ def test_compare_reports_does_not_reopen_audio(tmp_path):
 def test_read_only_server_still_omits_capture_section(tmp_path):
     server, _bridge = make_server(tmp_path)
     assert "capture_section" not in tools(server)
+
+
+def test_plan_section_evidence_combines_locator_capture_and_analysis_without_effects(tmp_path):
+    server, bridge = make_server(tmp_path)
+    result = asyncio.run(
+        server.call_tool(
+            "plan_section_evidence",
+            {
+                "name": "Intro",
+                "tap_specs": ["1:Main:master", "2:BASS:BASS"],
+                "capabilities": ["audio.levels", "audio.spectrum"],
+                "max_cost": "MODERATE",
+            },
+        )
+    )
+    data = result.structured_content
+    assert data["effect_state"] == "NOT_STARTED"
+    assert data["section"]["name"] == "Intro"
+    assert data["capture_request"]["start_beat"] == 0.0
+    assert data["capture_request"]["end_beat"] == 64.0
+    assert data["ready_to_execute"] is True
+    assert data["analysis_plan"]["selected_analyzers"][0]["name"] == "fake"
+    assert bridge.calls[-1] == (
+        "plan",
+        ("audio.levels", "audio.spectrum"),
+        {"max_cost": "MODERATE"},
+    )
