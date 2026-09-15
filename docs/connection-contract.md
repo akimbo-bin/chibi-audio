@@ -21,12 +21,11 @@ A client must not infer a capability from code that happens to exist inside the 
 ### Read
 Project/set metadata, tracks, routing, devices, parameters, clips, locators and browser search. Read operations are the default surface.
 ### Bounded write
-Pilot writes must have exact identity and before-state preconditions. The first implemented write is exact track-volume mutation using:
-- track index;
-- expected current track name;
-- expected current raw value;
-- requested new value.
-A mismatch refuses the operation. Generic setters, arbitrary calls and arbitrary Python execution are not exposed.
+Pilot writes must have exact identity and before-state preconditions. The bounded pilot surface now covers exact track volume/pan, mute/solo/name/color, and exact exposed device parameters.
+
+Writes require freshly observed identity plus expected before-state and verify the value after mutation. Optional Set-signature and object-id guards make stale indices fail closed. Device enable/bypass is a named bounded operation only when the exact host-exposed on/off parameter is identified.
+
+Generic setters, arbitrary calls and arbitrary Python execution are not exposed. See [control-plane.md](control-plane.md) for the model-facing facade, reversible audition-plan and parameter snapshot/diff contract.
 ### Capture
 The primary capture surface is ChibiTap plus bounded transport:
 - `chibitap_capture(enabled, expected_current_value, expected_device_id, expected_set_signature)`;
