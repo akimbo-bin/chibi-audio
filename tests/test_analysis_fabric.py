@@ -53,6 +53,7 @@ def test_capability_report_exposes_optional_librosa_without_requiring_it() -> No
 
     assert by_name["numpy_signal"]["available"] is True
     assert by_name["numpy_spectrum"]["cost"] == "MODERATE"
+    assert by_name["ffmpeg_loudnorm"]["capabilities"] == ["audio.loudness"]
     assert by_name["librosa_mir"]["license"] == "ISC"
     assert "audio.mir.onsets" in by_name["librosa_mir"]["capabilities"]
 
@@ -120,6 +121,25 @@ def test_spectrum_uses_channel_power_not_mono_sum(tmp_path: Path) -> None:
 
     assert spectrum["spectral_centroid_hz"] == pytest.approx(1000, abs=25)
     assert spectrum["band_energy_fraction"]["mid"] > 0.98
+
+
+def test_loudness_is_opt_in_and_bounded_to_requested_range(tmp_path: Path) -> None:
+    _require_ffmpeg()
+    source = tmp_path / "loudness.wav"
+    _write_pcm16(source, _sine(440, 3.0, amplitude=0.25))
+    request = AnalysisRequest(
+        capabilities=frozenset({AnalysisCapability.LOUDNESS}),
+        max_cost=AnalysisCost.MODERATE,
+        start_seconds=0.5,
+        end_seconds=2.5,
+    )
+
+    loudness = AudioAnalysisService().analyze(source, request).measurements[AnalysisCapability.LOUDNESS.value]
+
+    assert loudness["integrated_lufs"] is not None
+    assert loudness["true_peak_dbtp"] is not None
+    assert loudness["range"]["start_seconds"] == pytest.approx(0.5)
+    assert loudness["range"]["end_seconds"] == pytest.approx(2.5)
 
 
 def test_exact_content_and_config_reuse_cache(tmp_path: Path) -> None:
