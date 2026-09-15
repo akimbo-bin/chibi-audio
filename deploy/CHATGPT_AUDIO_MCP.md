@@ -61,6 +61,14 @@ Only after the bounded-write surface has been reviewed and explicitly authorized
 
 Use a reviewed, pinned OpenAI `tunnel-client` release for Windows. At the time this runbook was written, the validated upstream release is `v0.0.14` and includes a Windows amd64 archive. Verify the downloaded archive against the release's published SHA-256 data before use.
 
+The repository includes a download-only installer helper for that reviewed release:
+
+```powershell
+.\deploy\windows\install-openai-tunnel-client.ps1
+```
+
+The helper downloads the pinned Windows amd64 archive, verifies its embedded reviewed SHA-256 value, and copies only the verified executable into a local install directory. It does **not** create or connect a tunnel profile, store a runtime API key, configure persistence, start the client, or associate a ChatGPT workspace.
+
 Do not commit the runtime API key or generated tunnel profile. Keep profile/runtime/secret directories outside the repository, under the Windows user/service identity that owns the tunnel process.
 
 Use the official Secure MCP Tunnel bootstrap/connection flow to associate a dedicated audio tunnel with the intended ChatGPT workspace and configure its MCP command to execute the reviewed Windows launcher over stdio.
@@ -84,7 +92,13 @@ With default read-only startup, the server exposes production reads/evidence too
 - `get_sections`;
 - `resolve_section`;
 - `get_song_position`;
-- `plan_section_capture`.
+- `plan_section_capture`;
+- `list_audio_analyzers`;
+- `analyze_audio`;
+- `analyze_capture_manifest`;
+- `compare_analysis_reports`.
+
+The four reusable-analysis tools are a thin seam to the separately owned issue #8 analysis fabric. If that package is absent from the deployed checkout/runtime, `list_audio_analyzers` reports it unavailable and analysis requests fail closed. When #8 is present, callers explicitly select only the capabilities they need and a `CHEAP`, `MODERATE` or `EXPENSIVE` cost ceiling. The MCP adapter keeps direct artifacts, capture manifests and every finalized tap path confined below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 
 It must **not** enumerate bounded mutation tools or `capture_section` while writes are disabled.
 
@@ -99,15 +113,17 @@ After the tunnel profile is connected to the intended ChatGPT workspace:
 1. Inspect the app/plugin action list before enabling it.
 2. Start with the read-only launcher and confirm mutation tools are absent.
 3. Call `status` and require the reviewed capability classes.
-4. Add artist-authored Ableton Locators such as `Intro`, `Build`, `Drop 1`, `Bridge`.
-5. Call `get_sections` and confirm exact beat ranges match the Arrangement.
-6. Call `resolve_section` for one section and confirm the expected start/end beats.
-7. Call `plan_section_capture` with the desired tap specs and require `effect_state=NOT_STARTED`.
-8. Do not enable writes until the active Live Set is free for the coordinated bounded-write proof.
-9. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
-10. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
+4. Call `list_audio_analyzers`. If the #8 analysis fabric is deployed, require the reviewed capability/cost catalog; otherwise require an explicit unavailable result rather than partial analyzer execution.
+5. Analyze one known artifact or finalized capture manifest with an explicit small capability set/cost ceiling and verify returned artifact references remain relative to `CHIBI_AUDIO_ARTIFACT_ROOT`.
+6. Add artist-authored Ableton Locators such as `Intro`, `Build`, `Drop 1`, `Bridge`.
+7. Call `get_sections` and confirm exact beat ranges match the Arrangement.
+8. Call `resolve_section` for one section and confirm the expected start/end beats.
+9. Call `plan_section_capture` with the desired tap specs and require `effect_state=NOT_STARTED`.
+10. Do not enable writes until the active Live Set is free for the coordinated bounded-write proof.
+11. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
+12. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 
-Stop if the tool list contains an unexpected generic capability, Live is reachable on a non-loopback interface, the tunnel launches a different checkout, or a write-enabled surface appears without the explicit launcher flag.
+Stop if the tool list contains an unexpected generic capability, Live is reachable on a non-loopback interface, analysis can escape the configured artifact root, the tunnel launches a different checkout, or a write-enabled surface appears without the explicit launcher flag.
 
 ## Persistence
 
