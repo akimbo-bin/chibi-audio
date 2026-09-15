@@ -76,7 +76,7 @@ def test_read_only_server_omits_all_mutation_tools(tmp_path):
         "set_device_parameter",
         "set_device_enabled",
     }.intersection(tools)
-    assert all(tool.annotations.readOnlyHint is True for tool in tools.values())
+    assert all(tool.annotations.read_only_hint is True for tool in tools.values())
 
 
 def test_write_enabled_server_exposes_only_named_bounded_mutations(tmp_path):
@@ -98,8 +98,8 @@ def test_write_enabled_server_exposes_only_named_bounded_mutations(tmp_path):
     assert expected_writes.issubset(tools)
     assert not {"eval", "execute_python", "raw_live_call", "raw_jsonrpc", "click"}.intersection(tools)
     for name in expected_writes:
-        assert tools[name].annotations.readOnlyHint is False
-        assert tools[name].annotations.destructiveHint is True
+        assert tools[name].annotations.read_only_hint is False
+        assert tools[name].annotations.destructive_hint is True
 
 
 def test_status_reports_write_policy_without_mutating(tmp_path):
@@ -110,4 +110,4 @@ def test_status_reports_write_policy_without_mutating(tmp_path):
     )
     result = asyncio.run(server.call_tool("status", {}))
     assert facade.calls == [("status", {})]
-    assert result.structuredContent["mcp_writes_enabled"] is False
+    assert result.structured_content["mcp_writes_enabled"] is False
