@@ -34,9 +34,13 @@ The section-aware MCP adds five read-only tools:
 
 This is intentionally beat-based. Beat boundaries remain valid under tempo automation and can feed typed ChibiTap capture/finalization without premature conversion to wall-clock seconds. The artist's locator names are metadata/evidence, not instructions to the model.
 
-A section-capture plan does not arm ChibiTap, seek transport, start playback or write the Set. It includes the fresh locator Set signature so a future side-effecting `capture_section` operation can require the capture-session executor to confirm that same signature before its first effect. Until that fence exists in the executor, planning and execution remain separate rather than accepting a stale locator range race.
+A section-capture plan does not arm ChibiTap, seek transport, start playback or write the Set. It carries the fresh locator Set signature so execution can be fenced to the exact observed Arrangement state.
 
-The intended downstream command path is therefore straightforward: a worker can resolve `Drop 1` to exact beats, prepare the desired Main/BASS/DRUMS taps, and then hand that exact range to the typed capture-session executor once write authority and Set-signature finality are confirmed.
+When MCP writes are explicitly enabled, `capture_section` is also registered. It resolves the named section fresh, validates the requested ChibiTap target specs, then calls the existing typed capture-session executor with the exact `start_beat`, `end_beat` and `expected_set_signature`. The executor rereads the Set and refuses **before any transport or ChibiTap effect** if that signature no longer matches. Only after the finalized manifest exists below the configured artifact root does the MCP call return `effect_state: STARTED_CONFIRMED`.
+
+The resulting downstream command path is straightforward: a worker can resolve or plan `Drop 1`, choose Main/BASS/DRUMS taps, and—only with explicit write authority—capture that exact artist-authored section without guessing boundaries from the waveform or hard-coding bar numbers in chat history.
+
+The `capture_section` path is host-independent-test proven but has not yet been exercised against the active KISSKISSKISS Live Set while another worker owns that session.
 
 ## Reversible diagnostic audition
 
@@ -44,7 +48,7 @@ The intended downstream command path is therefore straightforward: a worker can 
 
 Each apply operation carries exact expected state. Each restore operation expects the temporary state before restoring the original value. If a human or another worker changes the Set in between, restoration refuses instead of silently clobbering that change.
 
-The future execution coordinator can combine an audition plan with bounded transport and ChibiTap capture while preserving the same effect-certainty rules.
+The execution coordinator can combine an audition plan with bounded transport and ChibiTap capture while preserving the same effect-certainty rules.
 
 ## Parameter snapshots and diffs
 
@@ -62,7 +66,7 @@ The base facade publishes explicit JSON-schema-shaped tool definitions rather th
 - bounded track volume/pan/properties;
 - bounded device parameters and enable state.
 
-`chibi_audio.mcp_server_sections` wraps that existing server and adds the five locator/section reads/planners without changing write authority or exposing the raw Live bridge. The installed `chibi-audio-mcp` command routes through this section-aware server.
+`chibi_audio.mcp_server_sections` wraps that existing server and adds the five locator/section reads/planners. When and only when `CHIBI_AUDIO_MCP_ALLOW_WRITES` is explicitly enabled, it also adds `capture_section` on top of the existing bounded mutation surface. The installed `chibi-audio-mcp` command routes through this section-aware server.
 
 There is deliberately no `eval`, arbitrary Python, raw Live call, raw JSON-RPC, or click/mouse compatibility tool.
 
@@ -74,7 +78,7 @@ This lets a secure MCP adapter expose analysis of known ChibiTap/experiment arti
 
 A read-only KISS smoke test used the facade itself against the local artifact root and reproduced the high-end diagnostic result for `D64_HOUSE.wav` without contacting Ableton.
 
-Authentication/network exposure is deliberately separate from the Live Remote Script. Port `18765` remains localhost-only. The intended deployment path is to mount this facade behind the existing Chibi secure MCP/tunnel boundary rather than exposing the Live bridge directly or inventing a second workflow authority.
+Authentication/network exposure is deliberately separate from the Live Remote Script. Port `18765` remains localhost-only. The intended deployment is the OpenAI Secure MCP Tunnel running on AKIMB0-PC and launching `chibi-audio-mcp` over stdio, so the tunnel and MCP process share the same Windows trust boundary as Ableton without exposing Live's loopback bridge. See `deploy/CHATGPT_AUDIO_MCP.md`.
 
 ## Parallel-lane boundary
 
