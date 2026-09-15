@@ -10,13 +10,8 @@ from typing import Iterable, Protocol
 from .core import default_core_analyzers
 from .io import AnalysisContext
 from .librosa_adapter import LibrosaMirAnalyzer
-from .models import (
-    SCHEMA_VERSION,
-    AnalysisCapability,
-    AnalysisReport,
-    AnalysisRequest,
-    AnalyzerDescriptor,
-)
+from .loudness import FfmpegLoudnessAnalyzer
+from .models import SCHEMA_VERSION, AnalysisReport, AnalysisRequest, AnalyzerDescriptor
 
 
 class AnalysisUnavailable(ValueError):
@@ -38,7 +33,13 @@ class AnalyzerRegistry:
 
     @classmethod
     def default(cls) -> "AnalyzerRegistry":
-        return cls((*default_core_analyzers(), LibrosaMirAnalyzer()))
+        return cls(
+            (
+                *default_core_analyzers(),
+                FfmpegLoudnessAnalyzer(),
+                LibrosaMirAnalyzer(),
+            )
+        )
 
     def register(self, analyzer: Analyzer) -> None:
         name = analyzer.descriptor.name
