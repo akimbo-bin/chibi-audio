@@ -25,15 +25,18 @@ Track/device/parameter IDs can supplement names and indices so stale references 
 
 Ableton Arrangement **Locators** are exposed by the Live Object Model as `cue_points`. Chibi Audio treats them as first-class artist-authored song structure rather than trying to infer every section from audio.
 
-The section-aware MCP adds four read-only tools:
+The section-aware MCP adds five read-only tools:
 - `get_locators` returns exact locator names and beat positions plus current/end-of-arrangement timing;
 - `get_sections` treats each locator as the start of a named section and the next locator (or `last_event_time`) as its end;
 - `resolve_section` turns a name such as `Drop 1` into an exact beat range and refuses ambiguous duplicate names unless an occurrence is supplied;
-- `get_song_position` reports the current Arrangement beat plus active/previous/next section context.
+- `get_song_position` reports the current Arrangement beat plus active/previous/next section context;
+- `plan_section_capture` resolves a named section and returns an exact capture-session-compatible beat range plus optional validated ChibiTap target specs while explicitly remaining `effect_state: NOT_STARTED`.
 
 This is intentionally beat-based. Beat boundaries remain valid under tempo automation and can feed typed ChibiTap capture/finalization without premature conversion to wall-clock seconds. The artist's locator names are metadata/evidence, not instructions to the model.
 
-The intended downstream command path is therefore straightforward: a worker can resolve `Drop 1` to exact beats, then request capture/analysis of that range without guessing section boundaries from the waveform or hard-coding bars in chat history.
+A section-capture plan does not arm ChibiTap, seek transport, start playback or write the Set. It includes the fresh locator Set signature so a future side-effecting `capture_section` operation can require the capture-session executor to confirm that same signature before its first effect. Until that fence exists in the executor, planning and execution remain separate rather than accepting a stale locator range race.
+
+The intended downstream command path is therefore straightforward: a worker can resolve `Drop 1` to exact beats, prepare the desired Main/BASS/DRUMS taps, and then hand that exact range to the typed capture-session executor once write authority and Set-signature finality are confirmed.
 
 ## Reversible diagnostic audition
 
@@ -59,7 +62,7 @@ The base facade publishes explicit JSON-schema-shaped tool definitions rather th
 - bounded track volume/pan/properties;
 - bounded device parameters and enable state.
 
-`chibi_audio.mcp_server_sections` wraps that existing server and adds the four locator/section reads without changing the write authority or exposing the raw Live bridge. The installed `chibi-audio-mcp` command routes through this section-aware server.
+`chibi_audio.mcp_server_sections` wraps that existing server and adds the five locator/section reads/planners without changing write authority or exposing the raw Live bridge. The installed `chibi-audio-mcp` command routes through this section-aware server.
 
 There is deliberately no `eval`, arbitrary Python, raw Live call, raw JSON-RPC, or click/mouse compatibility tool.
 
