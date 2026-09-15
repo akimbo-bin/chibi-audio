@@ -280,6 +280,65 @@ def test_comparison_covers_production_pitch_transcription_and_semantics() -> Non
     assert "probability" in semantic["interpretation_note"]
 
 
+def test_comparison_covers_dynamics_and_spectral_timeline_summaries() -> None:
+    left = _report(
+        "left.wav",
+        {
+            "audio.dynamics": {
+                "active_window_fraction": 0.80,
+                "active_rms_median_dbfs": -14.0,
+                "macro_dynamic_p90_to_p10_db": 8.0,
+                "second_minus_first_half_db": 2.0,
+                "loudest_window": {"rms_dbfs": -7.0},
+                "largest_adjacent_rms_change": {"rms_change_db": 4.0},
+            },
+            "audio.spectrum.timeline": {
+                "spectral_centroid": {"median_hz": 2200.0, "p90_minus_p10_hz": 1800.0},
+                "bands": {
+                    "low": {"median_fraction": 0.30, "p90_minus_p10_fraction": 0.10},
+                    "high": {"median_fraction": 0.10, "p90_minus_p10_fraction": 0.08},
+                },
+                "largest_sampled_spectral_shift": {"band_fraction_euclidean_distance": 0.25},
+            },
+        },
+    )
+    right = _report(
+        "right.wav",
+        {
+            "audio.dynamics": {
+                "active_window_fraction": 0.90,
+                "active_rms_median_dbfs": -11.0,
+                "macro_dynamic_p90_to_p10_db": 11.0,
+                "second_minus_first_half_db": 6.0,
+                "loudest_window": {"rms_dbfs": -4.0},
+                "largest_adjacent_rms_change": {"rms_change_db": 7.5},
+            },
+            "audio.spectrum.timeline": {
+                "spectral_centroid": {"median_hz": 3000.0, "p90_minus_p10_hz": 2600.0},
+                "bands": {
+                    "low": {"median_fraction": 0.22, "p90_minus_p10_fraction": 0.18},
+                    "high": {"median_fraction": 0.18, "p90_minus_p10_fraction": 0.15},
+                },
+                "largest_sampled_spectral_shift": {"band_fraction_euclidean_distance": 0.55},
+            },
+        },
+    )
+
+    compared = compare_reports(left, right)["comparisons"]
+    dynamics = compared["audio.dynamics"]
+    spectrum = compared["audio.spectrum.timeline"]
+
+    assert dynamics["active_rms_median_dbfs_delta"] == pytest.approx(3.0)
+    assert dynamics["macro_dynamic_p90_to_p10_db_delta"] == pytest.approx(3.0)
+    assert dynamics["second_minus_first_half_db_delta"] == pytest.approx(4.0)
+    assert dynamics["largest_adjacent_rms_change_db_delta"] == pytest.approx(3.5)
+    assert spectrum["spectral_centroid_median_hz_delta"] == pytest.approx(800.0)
+    assert spectrum["spectral_centroid_p90_minus_p10_hz_delta"] == pytest.approx(800.0)
+    assert spectrum["band_summary_delta"]["low"]["median_fraction_delta"] == pytest.approx(-0.08)
+    assert spectrum["band_summary_delta"]["high"]["p90_minus_p10_fraction_delta"] == pytest.approx(0.07)
+    assert spectrum["largest_sampled_spectral_shift_distance_delta"] == pytest.approx(0.30)
+
+
 def test_comparison_ignores_capabilities_not_present_on_both_sides() -> None:
     left = _report("left.wav", {"audio.levels": {"rms_dbfs": -10.0}})
     right = _report("right.wav", {"audio.loudness": {"integrated_lufs": -12.0}})
