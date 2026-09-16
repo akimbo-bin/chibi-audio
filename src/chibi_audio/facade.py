@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -13,6 +15,7 @@ from .control import (
 )
 from .harshness import analyze_harshness
 from .live import LiveBridgeClient, LivePilotWriteClient
+from .sidechain_compare import compare_sidechain_captures
 from .sidechain_verify import verify_sidechain_capture
 
 
@@ -86,6 +89,34 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "target_active_floor_dbfs": {"type": "number", "minimum": -160, "maximum": 0},
                 "target_activity_margin_db": {"type": "number", "exclusiveMinimum": 0},
                 "depth_threshold_db": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "compare_sidechain_captures": {
+        "description": (
+            "Compare two same-trigger sidechain capture manifests, normalize each target-post against its own target-pre render, "
+            "and create a downward-only level-matched target-post A/B under the configured artifact root."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": [
+                "baseline_manifest",
+                "candidate_manifest",
+                "trigger_label",
+                "target_pre_label",
+                "target_post_label",
+                "output_dir",
+                "comparison_id",
+            ],
+            "properties": {
+                "baseline_manifest": {"type": "string", "minLength": 1},
+                "candidate_manifest": {"type": "string", "minLength": 1},
+                "trigger_label": {"type": "string", "minLength": 1},
+                "target_pre_label": {"type": "string", "minLength": 1},
+                "target_post_label": {"type": "string", "minLength": 1},
+                "output_dir": {"type": "string", "minLength": 1},
+                "comparison_id": {"type": "string", "minLength": 1},
             },
             "additionalProperties": False,
         },
@@ -368,6 +399,7 @@ class ChibiAudioFacade:
                 },
             ),
             "verify_sidechain_capture": self._verify_sidechain_capture,
+            "compare_sidechain_captures": self._compare_sidechain_captures,
             "device_parameters": lambda a: self.read.call(
                 "device_parameters",
                 {"ref": {"id": int(a["device_id"])}, "limit": int(a.get("limit", 256))},
@@ -411,6 +443,25 @@ class ChibiAudioFacade:
             if key in args:
                 kwargs[key] = float(args[key])
         return verify_sidechain_capture(self._resolve_artifact(str(args["manifest"])), **kwargs)
+
+    def _compare_sidechain_captures(self, args: dict[str, Any]) -> dict[str, Any]:
+        summary = compare_sidechain_captures(
+            self._resolve_artifact(str(args["baseline_manifest"])),
+            self._resolve_artifact(str(args["candidate_manifest"])),
+            trigger_label=str(args["trigger_label"]),
+            target_pre_label=str(args["target_pre_label"]),
+            target_post_label=str(args["target_post_label"]),
+            output_dir=self._resolve_artifact_dir(str(args["output_dir"])),
+            comparison_id=str(args["comparison_id"]),
+        )
+        payload = json.loads(summary.read_text(encoding="utf-8"))
+        root = self.artifact_root.resolve() if self.artifact_root is not None else None
+        if root is None:
+            raise FacadeError("artifact analysis is unavailable because artifact_root is not configured")
+        payload["comparison_artifact"] = summary.relative_to(root).as_posix()
+        ab = Path(str(payload["level_matched_ab_manifest"])).resolve()
+        payload["level_matched_ab_manifest"] = ab.relative_to(root).as_posix()
+        return payload
 
     def _track_mixer_state(self, args: dict[str, Any]) -> dict[str, Any]:
         index = int(args["track_index"])
@@ -458,6 +509,21 @@ class ChibiAudioFacade:
             parameters=list(parameters),
             set_signature=args.get("set_signature"),
         )
+
+    def _resolve_artifact_dir(self, artifact: str) -> Path:
+        if self.artifact_root is None:
+            raise FacadeError("artifact analysis is unavailable because artifact_root is not configured")
+        relative = Path(artifact)
+        if relative.is_absolute():
+            raise FacadeError("artifact directory must be relative to the configured artifact root")
+        root = self.artifact_root.resolve()
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise FacadeError("artifact directory escapes the configured artifact root") from exc
+        candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
 
     def _resolve_artifact(self, artifact: str) -> Path:
         if self.artifact_root is None:

@@ -264,3 +264,59 @@ def test_nested_device_parameter_facade_routes_exact_ref_without_device_index():
     assert params["expected_device_class_name"] == "Compressor2"
     assert params["expected_parameter_id"] == 8888
     assert "device_index" not in params
+
+
+
+def test_sidechain_comparison_is_confined_and_returns_relative_artifacts(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    base = root / "baseline.json"
+    cand = root / "candidate.json"
+    base.write_text("{}", encoding="utf-8")
+    cand.write_text("{}", encoding="utf-8")
+    observed = {}
+
+    def fake_compare(baseline, candidate, **kwargs):
+        observed["baseline"] = baseline
+        observed["candidate"] = candidate
+        observed["kwargs"] = kwargs
+        out = Path(kwargs["output_dir"])
+        out.mkdir(parents=True, exist_ok=True)
+        ab = out / "proof__level-matched-ab.json"
+        ab.write_text("{}", encoding="utf-8")
+        summary = out / "proof__sidechain-comparison.json"
+        summary.write_text(
+            '{"effect_state":"NOT_STARTED","level_matched_ab_manifest":"' + str(ab).replace('\\', '\\\\') + '"}',
+            encoding="utf-8",
+        )
+        return summary
+
+    monkeypatch.setattr("chibi_audio.facade.compare_sidechain_captures", fake_compare)
+    facade = make_facade(root)
+    result = facade.call(
+        "compare_sidechain_captures",
+        {
+            "baseline_manifest": "baseline.json",
+            "candidate_manifest": "candidate.json",
+            "trigger_label": "TRIGGER",
+            "target_pre_label": "PRE",
+            "target_post_label": "POST",
+            "output_dir": "comparisons/proof",
+            "comparison_id": "proof",
+        },
+    )
+    assert result["effect_state"] == "NOT_STARTED"
+    assert result["comparison_artifact"] == "comparisons/proof/proof__sidechain-comparison.json"
+    assert result["level_matched_ab_manifest"] == "comparisons/proof/proof__level-matched-ab.json"
+    assert observed["baseline"] == base.resolve()
+    assert observed["candidate"] == cand.resolve()
+    assert observed["kwargs"]["output_dir"] == (root / "comparisons" / "proof").resolve()
+    assert facade.write.calls == []
+
+
+def test_artifact_output_directory_refuses_escape(tmp_path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    facade = make_facade(root)
+    with pytest.raises(FacadeError, match="escapes"):
+        facade._resolve_artifact_dir("../outside")
