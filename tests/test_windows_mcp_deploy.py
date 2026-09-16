@@ -5,6 +5,7 @@ RUNNER = Path("deploy/windows/run-chibi-audio-mcp.ps1")
 BOOTSTRAP = Path("deploy/windows/bootstrap-chibi-audio-mcp.ps1")
 TUNNEL_INSTALLER = Path("deploy/windows/install-openai-tunnel-client.ps1")
 RUNBOOK = Path("deploy/CHATGPT_AUDIO_MCP.md")
+APP_ALPHA = Path("deploy/CHATGPT_APP_ALPHA.md")
 
 
 def test_windows_runner_defaults_writes_off_and_uses_stdio_only():
@@ -62,3 +63,14 @@ def test_tunnel_runbook_keeps_live_loopback_and_tunnel_outbound():
     assert "CHIBI_AUDIO_MCP_ALLOW_WRITES=0" in source
     assert "capture_section" in source
     assert "capture_section_evidence" in source
+    assert "create_level_matched_ab" in source
+
+
+def test_chatgpt_app_alpha_separates_profiles():
+    source = APP_ALPHA.read_text(encoding="utf-8")
+    assert "Chibi Audio" in source
+    assert "Read Only" in source
+    assert "Write Enabled" in source
+    assert "create_level_matched_ab" in source
+    assert "Analyze tools" in source
+    assert "Secure MCP Tunnel" in source

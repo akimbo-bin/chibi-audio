@@ -2,6 +2,8 @@
 
 This runbook exposes the reviewed `chibi-audio-mcp` tool surface to an authorized ChatGPT workspace without exposing Ableton Live or the Remote Script JSON-RPC port to the network.
 
+See [`CHATGPT_APP_ALPHA.md`](CHATGPT_APP_ALPHA.md) for the reviewed two-profile ChatGPT custom-app rollout contract (read-only first, separate write-enabled profile after proof).
+
 ## Production topology
 
 ```text
@@ -101,9 +103,9 @@ With default read-only startup, the server exposes production reads/evidence too
 
 The four reusable-analysis tools are a thin seam to the separately owned issue #8 analysis fabric. If that package is absent from the deployed checkout/runtime, `list_audio_analyzers` reports it unavailable and analysis requests fail closed. When #8 is present, callers explicitly select only the capabilities they need and a `CHEAP`, `MODERATE` or `EXPENSIVE` cost ceiling. The MCP adapter keeps direct artifacts, capture manifests and every finalized tap path confined below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 
-It must **not** enumerate bounded mutation tools, `capture_section`, or `capture_section_evidence` while writes are disabled.
+It must **not** enumerate bounded mutation tools, `capture_section`, `capture_section_evidence`, or `create_level_matched_ab` while writes are disabled.
 
-With `-AllowWrites`, the reviewed bounded mutation tools become visible and both `capture_section` and `capture_section_evidence` are added. `capture_section` resolves the artist-authored Locator fresh, carries its Set signature into the managed ChibiTap capture executor, and refuses before topology/transport/Capture effects if the Set changed after planning. `capture_section_evidence` additionally validates the requested analyzer capabilities and cost ceiling **before any Live effect**, then analyzes the finalized manifest through the capability-driven fabric. If that post-capture analysis fails, it returns the confirmed capture effect, restored topology, manifest reference, and a sanitized `analysis_state=FAILED` result rather than hiding the already-completed effect behind an ambiguous tool failure. The managed path prepares exact signal-point taps, captures against the prepared signature, and restores/removes only the topology it temporarily borrowed or created.
+With `-AllowWrites`, the reviewed bounded mutation tools become visible and `capture_section`, `capture_section_evidence`, and `create_level_matched_ab` are added. `create_level_matched_ab` never contacts Live: it accepts only artifact-root-relative aligned WAVs, creates a downward-only level-matched float-WAV pair below the artifact root, refuses overwrite, and returns confined provenance. `capture_section` resolves the artist-authored Locator fresh, carries its Set signature into the managed ChibiTap capture executor, and refuses before topology/transport/Capture effects if the Set changed after planning. `capture_section_evidence` additionally validates the requested analyzer capabilities and cost ceiling **before any Live effect**, then analyzes the finalized manifest through the capability-driven fabric. If that post-capture analysis fails, it returns the confirmed capture effect, restored topology, manifest reference, and a sanitized `analysis_state=FAILED` result rather than hiding the already-completed effect behind an ambiguous tool failure. The managed path prepares exact signal-point taps, captures against the prepared signature, and restores/removes only the topology it temporarily borrowed or created.
 
 No mode exposes arbitrary Python, a shell, a generic Live Object Model caller/setter, raw JSON-RPC, filesystem-wide reads, or mouse/keyboard control.
 
@@ -125,6 +127,7 @@ After the tunnel profile is connected to the intended ChatGPT workspace:
 12. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
 13. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 14. Call `capture_section_evidence` with a small explicit capability set/cost ceiling and require `effect_state=STARTED_CONFIRMED`, `analysis_state=COMPLETED`, the validated `analysis_plan`, and artifact-relative analysis results. If analysis fails after capture, require the response to preserve the confirmed capture/restore/manifest state with `analysis_state=FAILED`.
+15. Call `create_level_matched_ab` on two already-aligned finalized artifacts and require `effect_type=artifact_creation`, `effect_state=STARTED_CONFIRMED`, zero positive gain, and only artifact-root-relative output references.
 
 Stop if the tool list contains an unexpected generic capability, Live is reachable on a non-loopback interface, analysis can escape the configured artifact root, the tunnel launches a different checkout, or a write-enabled surface appears without the explicit launcher flag.
 
