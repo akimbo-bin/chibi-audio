@@ -188,3 +188,13 @@ A fresh four-tap proof used Main/BASS/DRUMS/`38-Serum 2` (Tap IDs **1 / 2 / 3 / 
 The finalizer produced four 48 kHz stereo float32 artifacts at exactly **170,667 samples / 3.5555625 s**, with equal final sample counts, zero raw start offset and distinct SHA-256 fingerprints. Approximate exact-range measurements were Main **-8.13 LUFS / -1.0 dBTP**, BASS **-15.21 LUFS / -2.81 dBTP**, DRUMS **-10.44 LUFS / +3.24 dBTP**, and track 38 **-10.14 LUFS / -0.60 dBTP**.
 
 After the proof, transport was stopped and all four Capture parameters were verified Off. This closes the practical constant-tempo one-command capture loop without Export Audio/Video or steady-state CUA.
+
+### Poll-safe synchronized three-tap proof
+
+A real `capture-session` run exposed an important scheduling interaction: polling `capture_transport status` every 50-200 ms can starve the same Live ControlSurface scheduler responsible for the bounded `play_until` stop. In one diagnostic pass, the requested beats 128-144 did not stop until about beat **155.48**. Repeating the same pass with no in-play bridge polling stopped at about **144.10**, isolating the problem to coordinator polling rather than ChibiTap host-play gating.
+
+The session runner now watches ChibiTap WAV growth on disk while transport is active and performs only one final bridge-status reconciliation after capture growth becomes quiescent. This keeps steady-state monitoring off Live's main-thread scheduler.
+
+A fresh Main/BASS/DRUMS proof used Tap IDs **1 / 2 / 3** over beats **128-144 @ 135 BPM** with no active solos or mutes. All three raw captures were exactly **343,040 samples / 7.146667 s**, and Live reported the scheduled stop at about beat **144.036**. The exact-range finalizer then produced three authoritative stereo float32 files at exactly **341,333 samples / 7.111104 s** each. The manifest records equal raw sample counts, equal final sample counts, zero raw start offset, exact requested sample finality, Tap-ID-to-track/device provenance and distinct SHA-256 fingerprints.
+
+This closes the practical scheduler-starvation bug in the one-command multi-tap path: the coordinator no longer needs repeated main-thread status calls while Live owns the requested transport end.

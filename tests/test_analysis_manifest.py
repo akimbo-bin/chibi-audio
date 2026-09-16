@@ -125,3 +125,27 @@ def test_manifest_refuses_missing_requested_tap(tmp_path: Path) -> None:
             AnalysisRequest(capabilities=frozenset({AnalysisCapability.METADATA}), sample_rate=8000),
             tap_ids=[99],
         )
+
+def test_manifest_supports_legacy_cwd_relative_final_path(monkeypatch, tmp_path: Path) -> None:
+    _require_ffmpeg()
+    artifact = tmp_path / "legacy.wav"
+    _write_tone(artifact, 330.0)
+    manifest_dir = tmp_path / "nested"
+    manifest_dir.mkdir()
+    record = _artifact(artifact)
+    record["path"] = artifact.name
+    manifest = {
+        "schema_version": 1,
+        "experiment_id": "legacy-cwd-path",
+        "taps": [{"tap_id": 1, "source_label": "legacy", "final": record}],
+    }
+    manifest_path = manifest_dir / "legacy__manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = analyze_capture_manifest(
+        manifest_path,
+        AnalysisRequest(capabilities=frozenset({AnalysisCapability.METADATA}), sample_rate=8000),
+    )
+
+    assert Path(result["taps"][0]["artifact_path"]) == artifact

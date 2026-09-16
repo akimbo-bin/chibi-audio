@@ -38,6 +38,7 @@ The planner refuses a request when the capability is unavailable or exceeds the 
 ChibiTap capture finalization already emits per-artifact path, byte size, modified timestamp and exact SHA-256. `analyze_capture_manifest(...)` consumes that finalized manifest directly and can analyze every tap or an explicit tap subset.
 
 Before reusing the recorded SHA-256, the manifest adapter reconciles the current file's size and modification timestamp against finalization evidence. If the artifact changed or disappeared, analysis fails closed rather than assigning stale cache identity to different bytes.
+Finalized artifact paths in new manifests are relative to the manifest directory, so a capture package can move as one directory. The adapter retains a bounded compatibility fallback for older manifests that recorded paths relative to the coordinator working directory; that fallback is accepted only when the legacy path resolves to an existing file.
 
 `AudioAnalysisService.analyze(..., content_sha256=...)` then accepts the already-proven capture digest, so normal analysis does not need to hash a large finalized capture a second time.
 
