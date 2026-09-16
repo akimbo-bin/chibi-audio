@@ -452,7 +452,35 @@ def test_wait_for_capture_quiescence_accepts_file_complete_before_first_poll(mon
         {1: set()},
         timeout=1.0,
         poll_interval=0.1,
+        minimum_bytes=1024,
         quiet_seconds=0.3,
     )
 
     assert result == snapshot
+
+
+def test_wait_for_capture_quiescence_requires_requested_payload_before_quiet(monkeypatch, tmp_path):
+    import chibi_audio.capture_session as session
+
+    tap = CaptureSessionTap(1, "Main", "master")
+    path = tmp_path / "chibitap-tap-1-partial.wav"
+    clock = {"now": 0.0}
+    snapshot = {1: (path, 1024)}
+    monkeypatch.setattr(session, "_new_capture_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(session.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        session.time,
+        "sleep",
+        lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+    )
+
+    with pytest.raises(CaptureError, match="did not become quiescent"):
+        session._wait_for_capture_quiescence(
+            tmp_path,
+            [tap],
+            {1: set()},
+            timeout=0.5,
+            poll_interval=0.1,
+            minimum_bytes=2048,
+            quiet_seconds=0.2,
+        )

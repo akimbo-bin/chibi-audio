@@ -387,15 +387,17 @@ def _wait_for_capture_quiescence(
     *,
     timeout: float,
     poll_interval: float,
+    minimum_bytes: int = 45,
     quiet_seconds: float = 0.35,
 ) -> dict[int, tuple[Path, int]]:
     taps = list(resolved)
+    minimum_bytes = max(45, int(minimum_bytes))
     deadline = time.monotonic() + timeout
     last_snapshot: dict[int, tuple[Path, int]] | None = None
     last_change = time.monotonic()
     while time.monotonic() < deadline:
         snapshot = _new_capture_snapshot(root, taps, before)
-        if len(snapshot) == len(taps) and all(size > 44 for _path, size in snapshot.values()):
+        if len(snapshot) == len(taps) and all(size >= minimum_bytes for _path, size in snapshot.values()):
             now = time.monotonic()
             if last_snapshot != snapshot:
                 last_snapshot = snapshot
@@ -502,6 +504,10 @@ def run_capture_session(
             before,
             timeout=expected_seconds + timeout_margin,
             poll_interval=poll_interval,
+            # ChibiTap writes 48 kHz stereo float32 WAV. Requiring at least the
+            # requested payload size avoids mistaking a barely-created/partial
+            # file for a completed short capture when no growth was observed.
+            minimum_bytes=target_samples * 2 * 4,
         )
         status = capture_client.transport("status", expected_set_signature=set_signature)
         if bool(status.get("playing")):
