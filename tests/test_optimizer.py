@@ -9,7 +9,9 @@ from chibi_audio.optimizer import (
     CLEAN_LOUDNESS_EVALUATION_SCHEMA_VERSION,
     CleanLoudnessEvaluationError,
     CleanLoudnessGoal,
+    CleanLoudnessSweepPolicy,
     evaluate_clean_loudness_candidate,
+    evaluate_clean_loudness_sweep,
     load_analysis_report,
 )
 
@@ -208,3 +210,97 @@ def test_load_analysis_report_rejects_unknown_schema(tmp_path) -> None:
 
     with pytest.raises(CleanLoudnessEvaluationError, match="unsupported analysis schema"):
         load_analysis_report(path)
+
+def test_sweeep_estimates_knee_when_marginal_efficiency_falls() -> None:
+    baseline = _report(name="baseline.wav", integrated_lufs=-10.0)
+    first = _report(
+        name="candidate-a.wav",
+        integrated_lufs=-9.2,
+        true_peak_dbtp=-0.8,
+        crest_factor_db=7.8,
+    )
+    second = _report(
+        name="candidate-b.wav",
+        integrated_lufs=-8.8,
+        true_peak_dbtp=-0.7,
+        crest_factor_db=7.6,
+    )
+    third = _report(
+        name="candidate-c.wav",
+        integrated_lufs=-8.65,
+        true_peak_dbtp=-0.65,
+        crest_factor_db=7.5,
+    )
+
+    result = evaluate_clean_loudness_sweep(
+        baseline,
+        [(0.5, first), (1.0, second), (1.5, third)],
+        goal=_goal(min_loudness_gain_lu=0.0),
+        policy=CleanLoudnessSweepPolicy(max_points=5, min_marginal_lu_per_db=0.5),
+    )
+
+    assert result["mutation_effect_state"] == "NOT_STARTED"
+    assert result["knee"]["estimated"] is True
+    assert result["knee"]["reason"] == "marginal_efficiency_below_threshold"
+    assert result["knee"]["last_clean_point"]["drive_db"] == 1.0
+    assert result["knee"]["first_degraded_point"]["drive_db"] == 1.5
+    assert [row["clean_frontier_point"] for row in result["points"]] == [True, True, False]
+    assert result["points"][2]["marginal_lu_per_db"] == pytest.approx(0.3)
+
+
+def test_sweep_stops_clean_frontier_at_first_guardrail_failure() -> None:
+    baseline = _report(name="baseline.wav", integrated_lufs=-10.0)
+    clean = _report(
+        name="clean.wav",
+        integrated_lufs=-9.2,
+        true_peak_dbtp=-0.8,
+        crest_factor_db=7.8,
+    )
+    clipped = _report(
+        name="clipped.wav",
+        integrated_lufs=-8.2,
+        true_peak_dbtp=-0.1,
+        crest_factor_db=7.2,
+    )
+    later = _report(
+        name="later.wav",
+        integrated_lufs=-7.8,
+        true_peak_dbtp=-0.8,
+        crest_factor_db=7.1,
+    )
+
+    result = evaluate_clean_loudness_sweep(
+        baseline,
+        [(0.5, clean), (1.0, clipped), (1.5, later)],
+        goal=_goal(min_loudness_gain_lu=0.0),
+        policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.1),
+    )
+
+    assert result["knee"]["reason"] == "candidate_rejected"
+    assert result["knee"]["last_clean_point"]["drive_db"] == 0.5
+    assert result["knee"]["first_degraded_point"]["drive_db"] == 1.0
+    assert result["points"][1]["evaluation"]["decision"]["status"] == "reject"
+    assert result["points"][2]["clean_frontier_point"] is False
+
+
+def test_sweep_bounds_and_drive_identity_fail_closed() -> None:
+    baseline = _report(name="baseline.wav")
+    candidate = _report(name="candidate.wav", integrated_lufs=-9.0)
+    policy = CleanLoudnessSweepPolicy(max_points=1, min_marginal_lu_per_db=0.2)
+
+    with pytest.raises(CleanLoudnessEvaluationError, match="exceeding max_points"):
+        evaluate_clean_loudness_sweep(
+            baseline,
+            [(0.5, candidate), (1.0, candidate)],
+            goal=_goal(),
+            policy=policy,
+        )
+    with pytest.raises(CleanLoudnessEvaluationError, match="finite and > 0"):
+        evaluate_clean_loudness_sweep(
+            baseline,
+            [(0.0, candidate)],
+            goal=_goal(),
+            policy=policy,
+        )
+    with pytest.raises(CleanLoudnessEvaluationError, match="positive integer"):
+        CleanLoudnessSweepPolicy(max_points=0, min_marginal_lu_per_db=0.2)

@@ -286,3 +286,179 @@ def evaluate_clean_loudness_candidate(
     }
 
 
+
+CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION = "chibi-audio-clean-loudness-sweep/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class CleanLoudnessSweepPolicy:
+    """Explicit bounds for interpreting an already-rendered master-drive sweep."""
+
+    max_points: int
+    min_marginal_lu_per_db: float
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_points, bool) or not isinstance(self.max_points, int) or self.max_points <= 0:
+            raise CleanLoudnessEvaluationError("max_points must be a positive integer")
+        value = self.min_marginal_lu_per_db
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise CleanLoudnessEvaluationError("min_marginal_lu_per_db must be a finite number")
+        if not math.isfinite(float(value)) or value < 0:
+            raise CleanLoudnessEvaluationError("min_marginal_lu_per_db must be finite and >= 0")
+
+    def as_dict(self) -> dict[str, int | float]:
+        return asdict(self)
+
+
+def _report_identity(report: AnalysisReport) -> dict[str, Any]:
+    return {
+        "schema_version": report.schema_version,
+        "source_name": report.source_name,
+        "source_size_bytes": report.source_size_bytes,
+        "content_sha256": report.content_sha256,
+    }
+
+
+def evaluate_clean_loudness_sweep(
+    baseline: AnalysisReport,
+    candidates: list[tuple[float, AnalysisReport]],
+    *,
+    goal: CleanLoudnessGoal,
+    policy: CleanLoudnessSweepPolicy,
+) -> dict[str, Any]:
+    """Estimate the clean-loudness frontier from bounded, already-rendered candidates.
+
+    This is evidence-only. It never renders, mutates Live, or writes journals. Once a
+    point fails a configured guardrail, lacks required evidence, or falls below the
+    configured marginal-efficiency threshold, later points cannot reopen the frontier.
+    """
+    if not candidates:
+        raise CleanLoudnessEvaluationError("clean loudness sweep requires at least one candidate")
+    if len(candidates) > policy.max_points:
+        raise CleanLoudnessEvaluationError(
+            f"clean loudness sweep has {len(candidates)} points, exceeding max_points={policy.max_points}"
+        )
+
+    normalized: list[tuple[float, AnalysisReport]] = []
+    seen_drives: set[float] = set()
+    for raw_drive, report in candidates:
+        if isinstance(raw_drive, bool) or not isinstance(raw_drive, (int, float)):
+            raise CleanLoudnessEvaluationError("sweep drive values must be finite numbers")
+        drive = float(raw_drive)
+        if not math.isfinite(drive) or drive <= 0:
+            raise CleanLoudnessEvaluationError("sweep drive values must be finite and > 0 dB")
+        if drive in seen_drives:
+            raise CleanLoudnessEvaluationError(f"duplicate sweep drive value: {drive}")
+        seen_drives.add(drive)
+        normalized.append((drive, report))
+    normalized.sort(key=lambda item: item[0])
+
+    baseline_lufs = _number(
+        _measurement(baseline, AnalysisCapability.LOUDNESS), "integrated_lufs"
+    )
+    if baseline_lufs is None:
+        return {
+            "schema_version": CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION,
+            "objective": "clean_loudness_knee",
+            "mutation_effect_state": "NOT_STARTED",
+            "goal": goal.as_dict(),
+            "policy": policy.as_dict(),
+            "baseline": _report_identity(baseline),
+            "points": [],
+            "clean_frontier": None,
+            "knee": {
+                "estimated": False,
+                "reason": "missing_baseline_loudness",
+                "last_clean_point": None,
+                "first_degraded_point": None,
+            },
+            "interpretation_note": (
+                "The sweep could not be interpreted because baseline integrated loudness evidence is missing. "
+                "No Ableton mutation or render was attempted."
+            ),
+        }
+
+    previous_drive = 0.0
+    previous_lufs = baseline_lufs
+    frontier_open = True
+    last_clean_point: dict[str, Any] = {
+        "drive_db": 0.0,
+        "candidate": _report_identity(baseline),
+    }
+    first_degraded_point: dict[str, Any] | None = None
+    stop_reason: str | None = None
+    points: list[dict[str, Any]] = []
+
+    for drive, report in normalized:
+        evaluation = evaluate_clean_loudness_candidate(baseline, report, goal=goal)
+        candidate_lufs = _number(
+            _measurement(report, AnalysisCapability.LOUDNESS), "integrated_lufs"
+        )
+        marginal_lu_per_db = None
+        if candidate_lufs is not None:
+            marginal_lu_per_db = (candidate_lufs - previous_lufs) / (drive - previous_drive)
+
+        decision_status = str(evaluation["decision"]["status"])
+        point_reason: str | None = None
+        clean_frontier_point = False
+        if frontier_open:
+            if decision_status == "inconclusive":
+                point_reason = "inconclusive_evidence"
+            elif decision_status == "reject":
+                point_reason = "candidate_rejected"
+            elif marginal_lu_per_db is None:
+                point_reason = "missing_marginal_loudness_evidence"
+            elif marginal_lu_per_db < policy.min_marginal_lu_per_db:
+                point_reason = "marginal_efficiency_below_threshold"
+            else:
+                clean_frontier_point = True
+                last_clean_point = {
+                    "drive_db": drive,
+                    "candidate": _report_identity(report),
+                }
+
+            if point_reason is not None:
+                frontier_open = False
+                stop_reason = point_reason
+                first_degraded_point = {
+                    "drive_db": drive,
+                    "candidate": _report_identity(report),
+                }
+
+        points.append(
+            {
+                "drive_db": drive,
+                "candidate": _report_identity(report),
+                "marginal_lu_per_db": marginal_lu_per_db,
+                "clean_frontier_point": clean_frontier_point,
+                "frontier_stop_reason": point_reason,
+                "evaluation": evaluation,
+            }
+        )
+        previous_drive = drive
+        if candidate_lufs is not None:
+            previous_lufs = candidate_lufs
+
+    if stop_reason is None:
+        stop_reason = "highest_tested_point_remains_clean"
+
+    return {
+        "schema_version": CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION,
+        "objective": "clean_loudness_knee",
+        "mutation_effect_state": "NOT_STARTED",
+        "goal": goal.as_dict(),
+        "policy": policy.as_dict(),
+        "baseline": _report_identity(baseline),
+        "points": points,
+        "clean_frontier": last_clean_point,
+        "knee": {
+            "estimated": first_degraded_point is not None,
+            "reason": stop_reason,
+            "last_clean_point": last_clean_point,
+            "first_degraded_point": first_degraded_point,
+        },
+        "interpretation_note": (
+            "This estimates a clean-loudness frontier from already-rendered evidence only. "
+            "It does not authorize, perform, or replay any Ableton mutation or render."
+        ),
+    }
