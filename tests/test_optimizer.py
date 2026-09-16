@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -48,7 +49,7 @@ def _report(
             AnalysisCapability.LEVELS.value: {"crest_factor_db": crest_factor_db},
             AnalysisCapability.TEXTURE.value: texture,
         },
-        content_sha256=("a" if name == "baseline.wav" else "b") * 64,
+        content_sha256=("a" * 64 if name == "baseline.wav" else hashlib.sha256(name.encode("utf-8")).hexdigest()),
     )
 
 
@@ -304,3 +305,18 @@ def test_sweep_bounds_and_drive_identity_fail_closed() -> None:
         )
     with pytest.raises(CleanLoudnessEvaluationError, match="positive integer"):
         CleanLoudnessSweepPolicy(max_points=0, min_marginal_lu_per_db=0.2)
+
+
+def test_sweep_refuses_duplicate_render_identity_across_drive_points() -> None:
+    baseline = _report(name="baseline.wav")
+    first = _report(name="first.wav", integrated_lufs=-9.5)
+    duplicate = _report(name="second.wav", integrated_lufs=-9.0)
+    object.__setattr__(duplicate, "content_sha256", first.content_sha256)
+
+    with pytest.raises(CleanLoudnessEvaluationError, match="duplicate sweep audio content_sha256"):
+        evaluate_clean_loudness_sweep(
+            baseline,
+            [(0.5, first), (1.0, duplicate)],
+            goal=_goal(min_loudness_gain_lu=0.0),
+            policy=CleanLoudnessSweepPolicy(max_points=2, min_marginal_lu_per_db=0.2),
+        )

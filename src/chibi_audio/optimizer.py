@@ -319,6 +319,16 @@ def _report_identity(report: AnalysisReport) -> dict[str, Any]:
     }
 
 
+def _exact_content_sha256(report: AnalysisReport, *, context: str) -> str:
+    value = report.content_sha256
+    if not isinstance(value, str):
+        raise CleanLoudnessEvaluationError(f"{context} requires exact content_sha256 evidence")
+    normalized = value.lower()
+    if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+        raise CleanLoudnessEvaluationError(f"{context} requires exact content_sha256 evidence")
+    return normalized
+
+
 def evaluate_clean_loudness_sweep(
     baseline: AnalysisReport,
     candidates: list[tuple[float, AnalysisReport]],
@@ -339,8 +349,12 @@ def evaluate_clean_loudness_sweep(
             f"clean loudness sweep has {len(candidates)} points, exceeding max_points={policy.max_points}"
         )
 
+    baseline_content_sha256 = _exact_content_sha256(
+        baseline, context="clean loudness sweep baseline"
+    )
     normalized: list[tuple[float, AnalysisReport]] = []
     seen_drives: set[float] = set()
+    seen_content_sha256: set[str] = {baseline_content_sha256}
     for raw_drive, report in candidates:
         if isinstance(raw_drive, bool) or not isinstance(raw_drive, (int, float)):
             raise CleanLoudnessEvaluationError("sweep drive values must be finite numbers")
@@ -349,7 +363,15 @@ def evaluate_clean_loudness_sweep(
             raise CleanLoudnessEvaluationError("sweep drive values must be finite and > 0 dB")
         if drive in seen_drives:
             raise CleanLoudnessEvaluationError(f"duplicate sweep drive value: {drive}")
+        content_sha256 = _exact_content_sha256(
+            report, context=f"clean loudness sweep drive {drive}"
+        )
+        if content_sha256 in seen_content_sha256:
+            raise CleanLoudnessEvaluationError(
+                f"duplicate sweep audio content_sha256 at drive {drive}"
+            )
         seen_drives.add(drive)
+        seen_content_sha256.add(content_sha256)
         normalized.append((drive, report))
     normalized.sort(key=lambda item: item[0])
 

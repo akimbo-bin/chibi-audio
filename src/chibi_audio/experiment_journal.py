@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .analysis.models import AnalysisReport
 from .capture import CaptureError, _safe_id
-from .optimizer import CLEAN_LOUDNESS_EVALUATION_SCHEMA_VERSION
+from .optimizer import (
+    CLEAN_LOUDNESS_EVALUATION_SCHEMA_VERSION,
+    CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION,
+    CleanLoudnessGoal,
+    CleanLoudnessSweepPolicy,
+    evaluate_clean_loudness_sweep,
+)
 
 
 JOURNAL_SCHEMA_VERSION = 1
@@ -440,6 +448,355 @@ def _verify_optimizer_bindings(journal_path: Path, journal: dict[str, Any]) -> N
         ):
             if binding.get(key) != summary[key]:
                 raise CaptureError(f"optimizer evaluation binding summary changed: {label}.{key}")
+
+
+JOURNAL_CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION = "chibi-audio-journal-clean-loudness-sweep/v1"
+
+
+def _bound_analysis_report(
+    journal_path: Path,
+    journal: dict[str, Any],
+    *,
+    label: str,
+    tap_id: int,
+) -> AnalysisReport:
+    if isinstance(tap_id, bool) or not isinstance(tap_id, int):
+        raise CaptureError("optimizer sweep tap_id must be an integer")
+    safe_label = _safe_id(label)
+    evidence = journal.get("evidence")
+    if not isinstance(evidence, dict):
+        raise CaptureError("experiment journal evidence must be an object")
+    bindings = evidence.get("analysis_reports", [])
+    if not isinstance(bindings, list):
+        raise CaptureError("experiment journal analysis_reports must be a list")
+
+    matches = [
+        binding
+        for binding in bindings
+        if isinstance(binding, dict) and binding.get("label") == safe_label
+    ]
+    if len(matches) != 1:
+        raise CaptureError(
+            f"experiment journal must contain exactly one analysis binding labeled: {safe_label}"
+        )
+    binding = matches[0]
+    report_ref = str(binding.get("report_path") or "")
+    if not report_ref:
+        raise CaptureError(f"analysis report binding is incomplete: {safe_label}")
+    report_path = _resolve_reference(report_ref, journal_path.parent)
+    if not report_path.is_file():
+        raise CaptureError(f"bound analysis report does not exist: {report_path}")
+    expected_report_hash = _normalize_sha256(
+        binding.get("report_sha256"),
+        context=f"analysis report binding {safe_label}",
+    )
+    if _sha256(report_path) != expected_report_hash:
+        raise CaptureError(f"bound analysis report SHA-256 changed: {safe_label}")
+
+    payload = _load_json_object(report_path)
+    capture = journal.get("capture")
+    if not isinstance(capture, dict):
+        raise CaptureError("experiment journal is missing capture binding")
+    manifest_ref = str(capture.get("manifest_path") or "")
+    if not manifest_ref:
+        raise CaptureError("experiment journal capture binding is incomplete")
+    manifest_path = _resolve_reference(manifest_ref, journal_path.parent)
+    manifest = _load_json_object(manifest_path)
+    _validate_capture_analysis_report(payload, manifest)
+
+    taps = payload.get("taps")
+    assert isinstance(taps, list)
+    tap_matches = [
+        entry
+        for entry in taps
+        if isinstance(entry, dict) and entry.get("tap_id") == tap_id
+    ]
+    if len(tap_matches) != 1:
+        raise CaptureError(
+            f"analysis binding {safe_label} must contain exactly one tap_id={tap_id}"
+        )
+    analysis = tap_matches[0].get("analysis")
+    if not isinstance(analysis, dict):
+        raise CaptureError(
+            f"analysis binding {safe_label} tap {tap_id} has no analysis payload"
+        )
+    report = AnalysisReport.from_dict(analysis)
+    if report.schema_version != ANALYSIS_REPORT_SCHEMA_VERSION:
+        raise CaptureError(
+            f"analysis binding {safe_label} tap {tap_id} must use {ANALYSIS_REPORT_SCHEMA_VERSION}"
+        )
+    report_hash = _normalize_sha256(
+        report.content_sha256,
+        context=f"analysis binding {safe_label} tap {tap_id} content",
+    )
+    binding_taps = binding.get("taps")
+    if not isinstance(binding_taps, list):
+        raise CaptureError(f"analysis report binding {safe_label} has invalid tap summaries")
+    summary_matches = [
+        entry
+        for entry in binding_taps
+        if isinstance(entry, dict) and entry.get("tap_id") == tap_id
+    ]
+    if len(summary_matches) != 1:
+        raise CaptureError(
+            f"analysis report binding {safe_label} must summarize tap_id={tap_id}"
+        )
+    summary_hash = _normalize_sha256(
+        summary_matches[0].get("content_sha256"),
+        context=f"analysis report binding {safe_label} tap {tap_id} content",
+    )
+    if report_hash != summary_hash:
+        raise CaptureError(
+            f"analysis report binding {safe_label} tap {tap_id} content identity changed"
+        )
+    return report
+
+
+def _journal_lineage(journal: dict[str, Any]) -> dict[str, str]:
+    capture = journal.get("capture")
+    if not isinstance(capture, dict):
+        raise CaptureError("experiment journal is missing capture binding")
+    experiment_id = str(capture.get("experiment_id") or "")
+    manifest_sha256 = _normalize_sha256(
+        capture.get("manifest_sha256"),
+        context=f"experiment journal {experiment_id or '<unknown>'} capture manifest",
+    )
+    if not experiment_id:
+        raise CaptureError("experiment journal capture binding is missing experiment_id")
+    return {"experiment_id": experiment_id, "manifest_sha256": manifest_sha256}
+
+
+def _validate_sweep_journal_family(
+    baseline: dict[str, Any],
+    candidate: dict[str, Any],
+) -> None:
+    if baseline.get("variant_role") != "baseline":
+        raise CaptureError("clean loudness sweep baseline journal must have variant_role=baseline")
+    if candidate.get("variant_role") != "candidate":
+        raise CaptureError("clean loudness sweep candidates must have variant_role=candidate")
+    if candidate.get("comparison_id") != baseline.get("comparison_id"):
+        raise CaptureError("clean loudness sweep journals must share comparison_id")
+    baseline_lineage = _journal_lineage(baseline)
+    if str(candidate.get("parent_experiment_id") or "") != baseline_lineage["experiment_id"]:
+        raise CaptureError(
+            "clean loudness sweep candidate parent_experiment_id must match baseline experiment_id"
+        )
+
+
+def create_clean_loudness_journal_sweep(
+    *,
+    baseline_journal: str | Path,
+    candidates: Iterable[tuple[float, str | Path]],
+    analysis_label: str,
+    tap_id: int,
+    goal: CleanLoudnessGoal,
+    policy: CleanLoudnessSweepPolicy,
+    output_path: str | Path,
+    created_at_utc: str | None = None,
+) -> Path:
+    """Evaluate and persist a bounded sweep using only evidence already bound to journals."""
+    baseline_path = Path(baseline_journal)
+    output = Path(output_path)
+    baseline = verify_experiment_journal(baseline_path)
+    if baseline.get("variant_role") != "baseline":
+        raise CaptureError("clean loudness sweep baseline journal must have variant_role=baseline")
+    baseline_report = _bound_analysis_report(
+        baseline_path, baseline, label=analysis_label, tap_id=tap_id
+    )
+    baseline_lineage = _journal_lineage(baseline)
+    baseline_content_sha256 = _normalize_sha256(
+        baseline_report.content_sha256,
+        context="clean loudness sweep baseline content",
+    )
+
+    candidate_items = list(candidates)
+    candidate_paths = [Path(candidate_path) for _, candidate_path in candidate_items]
+    protected_paths = {baseline_path.resolve()}
+    protected_paths.update(candidate_path.resolve() for candidate_path in candidate_paths)
+    if output.resolve() in protected_paths:
+        raise CaptureError(
+            "clean loudness sweep output_path must not overwrite a bound experiment journal"
+        )
+
+    sweep_inputs: list[tuple[float, AnalysisReport]] = []
+    candidate_bindings: list[dict[str, Any]] = []
+    for raw_drive, candidate_path in candidate_items:
+        if isinstance(raw_drive, bool) or not isinstance(raw_drive, (int, float)):
+            raise CaptureError("clean loudness sweep candidate drive must be a finite number")
+        drive = float(raw_drive)
+        if not math.isfinite(drive) or drive <= 0:
+            raise CaptureError("clean loudness sweep candidate drive must be finite and > 0 dB")
+        candidate = verify_experiment_journal(candidate_path)
+        _validate_sweep_journal_family(baseline, candidate)
+        candidate_report = _bound_analysis_report(
+            candidate_path, candidate, label=analysis_label, tap_id=tap_id
+        )
+        sweep_inputs.append((drive, candidate_report))
+        candidate_lineage = _journal_lineage(candidate)
+        candidate_bindings.append(
+            {
+                "drive_db": drive,
+                "journal_path": _relative_reference(
+                    candidate_path.resolve(), output.parent.resolve()
+                ),
+                "experiment_id": candidate_lineage["experiment_id"],
+                "manifest_sha256": candidate_lineage["manifest_sha256"],
+                "content_sha256": _normalize_sha256(
+                    candidate_report.content_sha256,
+                    context=(
+                        "clean loudness sweep candidate "
+                        f"{candidate_lineage['experiment_id']} content"
+                    ),
+                ),
+            }
+        )
+
+    sweep = evaluate_clean_loudness_sweep(
+        baseline_report,
+        sweep_inputs,
+        goal=goal,
+        policy=policy,
+    )
+    candidate_bindings.sort(key=lambda item: item["drive_db"])
+    payload: dict[str, Any] = {
+        "schema_version": JOURNAL_CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION,
+        "objective": "clean_loudness_knee",
+        "mutation_effect_state": "NOT_STARTED",
+        "comparison_id": str(baseline.get("comparison_id") or ""),
+        "analysis_label": _safe_id(analysis_label),
+        "tap_id": tap_id,
+        "goal": goal.as_dict(),
+        "policy": policy.as_dict(),
+        "baseline": {
+            "journal_path": _relative_reference(
+                baseline_path.resolve(), output.parent.resolve()
+            ),
+            "experiment_id": baseline_lineage["experiment_id"],
+            "manifest_sha256": baseline_lineage["manifest_sha256"],
+            "content_sha256": baseline_content_sha256,
+        },
+        "candidates": candidate_bindings,
+        "sweep": sweep,
+        "created_at_utc": created_at_utc or _utc_now(),
+    }
+    return _atomic_write_json(output, payload)
+
+
+def verify_clean_loudness_journal_sweep(path: str | Path) -> dict[str, Any]:
+    sweep_path = Path(path)
+    payload = _load_json_object(sweep_path)
+    if payload.get("schema_version") != JOURNAL_CLEAN_LOUDNESS_SWEEP_SCHEMA_VERSION:
+        raise CaptureError("unsupported clean loudness journal sweep schema_version")
+    if payload.get("objective") != "clean_loudness_knee":
+        raise CaptureError("clean loudness journal sweep objective must be clean_loudness_knee")
+    if payload.get("mutation_effect_state") != "NOT_STARTED":
+        raise CaptureError(
+            "clean loudness journal sweep must remain evidence-only with mutation_effect_state=NOT_STARTED"
+        )
+
+    comparison_id = str(payload.get("comparison_id") or "")
+    analysis_label = str(payload.get("analysis_label") or "")
+    tap_id = payload.get("tap_id")
+    if not comparison_id or not analysis_label:
+        raise CaptureError("clean loudness journal sweep identity is incomplete")
+    if isinstance(tap_id, bool) or not isinstance(tap_id, int):
+        raise CaptureError("clean loudness journal sweep tap_id must be an integer")
+
+    goal_data = payload.get("goal")
+    policy_data = payload.get("policy")
+    if not isinstance(goal_data, dict) or not isinstance(policy_data, dict):
+        raise CaptureError("clean loudness journal sweep goal/policy are invalid")
+    try:
+        goal = CleanLoudnessGoal(**goal_data)
+        policy = CleanLoudnessSweepPolicy(**policy_data)
+    except (TypeError, ValueError) as exc:
+        raise CaptureError("clean loudness journal sweep goal/policy are invalid") from exc
+
+    baseline_binding = payload.get("baseline")
+    if not isinstance(baseline_binding, dict):
+        raise CaptureError("clean loudness journal sweep baseline binding is invalid")
+    baseline_ref = str(baseline_binding.get("journal_path") or "")
+    if not baseline_ref:
+        raise CaptureError("clean loudness journal sweep baseline binding is incomplete")
+    baseline_path = _resolve_reference(baseline_ref, sweep_path.parent)
+    baseline = verify_experiment_journal(baseline_path)
+    if baseline.get("variant_role") != "baseline":
+        raise CaptureError("clean loudness sweep baseline journal must have variant_role=baseline")
+    if baseline.get("comparison_id") != comparison_id:
+        raise CaptureError("clean loudness sweep comparison_id changed")
+    baseline_lineage = _journal_lineage(baseline)
+    baseline_report = _bound_analysis_report(
+        baseline_path, baseline, label=analysis_label, tap_id=tap_id
+    )
+    baseline_summary = {
+        "experiment_id": baseline_lineage["experiment_id"],
+        "manifest_sha256": baseline_lineage["manifest_sha256"],
+        "content_sha256": _normalize_sha256(
+            baseline_report.content_sha256,
+            context="clean loudness sweep baseline content",
+        ),
+    }
+    for key, value in baseline_summary.items():
+        if baseline_binding.get(key) != value:
+            raise CaptureError(f"clean loudness sweep baseline lineage changed: {key}")
+
+    candidate_bindings = payload.get("candidates")
+    if not isinstance(candidate_bindings, list) or not candidate_bindings:
+        raise CaptureError("clean loudness journal sweep requires candidate bindings")
+    sweep_inputs: list[tuple[float, AnalysisReport]] = []
+    seen_drives: set[float] = set()
+    for binding in candidate_bindings:
+        if not isinstance(binding, dict):
+            raise CaptureError("clean loudness sweep candidate binding must be an object")
+        raw_drive = binding.get("drive_db")
+        if isinstance(raw_drive, bool) or not isinstance(raw_drive, (int, float)):
+            raise CaptureError("clean loudness sweep candidate drive must be a finite number")
+        drive = float(raw_drive)
+        if not math.isfinite(drive) or drive <= 0:
+            raise CaptureError("clean loudness sweep candidate drive must be finite and > 0 dB")
+        if drive in seen_drives:
+            raise CaptureError(f"clean loudness sweep contains duplicate drive value: {drive}")
+        seen_drives.add(drive)
+        journal_ref = str(binding.get("journal_path") or "")
+        if not journal_ref:
+            raise CaptureError("clean loudness sweep candidate binding is incomplete")
+        candidate_path = _resolve_reference(journal_ref, sweep_path.parent)
+        candidate = verify_experiment_journal(candidate_path)
+        _validate_sweep_journal_family(baseline, candidate)
+        candidate_report = _bound_analysis_report(
+            candidate_path, candidate, label=analysis_label, tap_id=tap_id
+        )
+        lineage = _journal_lineage(candidate)
+        expected = {
+            "experiment_id": lineage["experiment_id"],
+            "manifest_sha256": lineage["manifest_sha256"],
+            "content_sha256": _normalize_sha256(
+                candidate_report.content_sha256,
+                context=(
+                    "clean loudness sweep candidate "
+                    f"{lineage['experiment_id']} content"
+                ),
+            ),
+        }
+        for key, value in expected.items():
+            if binding.get(key) != value:
+                raise CaptureError(
+                    "clean loudness sweep candidate lineage changed: "
+                    f"{lineage['experiment_id']}.{key}"
+                )
+        sweep_inputs.append((drive, candidate_report))
+
+    recomputed = evaluate_clean_loudness_sweep(
+        baseline_report,
+        sweep_inputs,
+        goal=goal,
+        policy=policy,
+    )
+    if payload.get("sweep") != recomputed:
+        raise CaptureError(
+            "clean loudness sweep result no longer matches bound journal evidence"
+        )
+    return payload
 
 
 def create_experiment_journal(
