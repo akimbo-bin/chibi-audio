@@ -458,10 +458,16 @@ def _bound_analysis_report(
     journal: dict[str, Any],
     *,
     label: str,
-    tap_id: int,
+    tap_id: int | None = None,
+    source_label: str | None = None,
 ) -> AnalysisReport:
-    if isinstance(tap_id, bool) or not isinstance(tap_id, int):
+    if tap_id is None and source_label is None:
+        raise CaptureError("optimizer sweep requires tap_id or source_label")
+    if tap_id is not None and source_label is not None:
+        raise CaptureError("optimizer sweep tap_id and source_label are mutually exclusive")
+    if tap_id is not None and (isinstance(tap_id, bool) or not isinstance(tap_id, int)):
         raise CaptureError("optimizer sweep tap_id must be an integer")
+    safe_source_label = _safe_id(source_label) if source_label is not None else None
     safe_label = _safe_id(label)
     evidence = journal.get("evidence")
     if not isinstance(evidence, dict):
@@ -506,28 +512,43 @@ def _bound_analysis_report(
 
     taps = payload.get("taps")
     assert isinstance(taps, list)
-    tap_matches = [
-        entry
-        for entry in taps
-        if isinstance(entry, dict) and entry.get("tap_id") == tap_id
-    ]
+    if tap_id is not None:
+        selector = f"tap_id={tap_id}"
+        tap_matches = [
+            entry
+            for entry in taps
+            if isinstance(entry, dict) and entry.get("tap_id") == tap_id
+        ]
+    else:
+        selector = f"source_label={safe_source_label!r}"
+        tap_matches = [
+            entry
+            for entry in taps
+            if isinstance(entry, dict)
+            and str(entry.get("source_label") or "") == safe_source_label
+        ]
     if len(tap_matches) != 1:
         raise CaptureError(
-            f"analysis binding {safe_label} must contain exactly one tap_id={tap_id}"
+            f"analysis binding {safe_label} must contain exactly one {selector}"
         )
-    analysis = tap_matches[0].get("analysis")
+    selected = tap_matches[0]
+    selected_tap_id = selected.get("tap_id")
+    selected_source_label = str(selected.get("source_label") or "")
+    if isinstance(selected_tap_id, bool) or not isinstance(selected_tap_id, int):
+        raise CaptureError(f"analysis binding {safe_label} selected tap has invalid tap_id")
+    analysis = selected.get("analysis")
     if not isinstance(analysis, dict):
         raise CaptureError(
-            f"analysis binding {safe_label} tap {tap_id} has no analysis payload"
+            f"analysis binding {safe_label} {selector} has no analysis payload"
         )
     report = AnalysisReport.from_dict(analysis)
     if report.schema_version != ANALYSIS_REPORT_SCHEMA_VERSION:
         raise CaptureError(
-            f"analysis binding {safe_label} tap {tap_id} must use {ANALYSIS_REPORT_SCHEMA_VERSION}"
+            f"analysis binding {safe_label} {selector} must use {ANALYSIS_REPORT_SCHEMA_VERSION}"
         )
     report_hash = _normalize_sha256(
         report.content_sha256,
-        context=f"analysis binding {safe_label} tap {tap_id} content",
+        context=f"analysis binding {safe_label} {selector} content",
     )
     binding_taps = binding.get("taps")
     if not isinstance(binding_taps, list):
@@ -535,19 +556,21 @@ def _bound_analysis_report(
     summary_matches = [
         entry
         for entry in binding_taps
-        if isinstance(entry, dict) and entry.get("tap_id") == tap_id
+        if isinstance(entry, dict)
+        and entry.get("tap_id") == selected_tap_id
+        and str(entry.get("source_label") or "") == selected_source_label
     ]
     if len(summary_matches) != 1:
         raise CaptureError(
-            f"analysis report binding {safe_label} must summarize tap_id={tap_id}"
+            f"analysis report binding {safe_label} must summarize selected {selector}"
         )
     summary_hash = _normalize_sha256(
         summary_matches[0].get("content_sha256"),
-        context=f"analysis report binding {safe_label} tap {tap_id} content",
+        context=f"analysis report binding {safe_label} {selector} content",
     )
     if report_hash != summary_hash:
         raise CaptureError(
-            f"analysis report binding {safe_label} tap {tap_id} content identity changed"
+            f"analysis report binding {safe_label} {selector} content identity changed"
         )
     return report
 
@@ -635,12 +658,13 @@ def create_clean_loudness_journal_sweep(
     baseline_journal: str | Path,
     candidates: Iterable[tuple[float, str | Path]],
     analysis_label: str,
-    tap_id: int,
     drive_target: str,
     drive_parameter: str,
     goal: CleanLoudnessGoal,
     policy: CleanLoudnessSweepPolicy,
     output_path: str | Path,
+    tap_id: int | None = None,
+    source_label: str | None = None,
     created_at_utc: str | None = None,
 ) -> Path:
     """Evaluate and persist a bounded sweep using only evidence already bound to journals."""
@@ -649,8 +673,17 @@ def create_clean_loudness_journal_sweep(
     baseline = verify_experiment_journal(baseline_path)
     if baseline.get("variant_role") != "baseline":
         raise CaptureError("clean loudness sweep baseline journal must have variant_role=baseline")
+    if tap_id is None and source_label is None:
+        raise CaptureError("clean loudness sweep requires tap_id or source_label")
+    if tap_id is not None and source_label is not None:
+        raise CaptureError("clean loudness sweep tap_id and source_label are mutually exclusive")
+    safe_source_label = _safe_id(source_label) if source_label is not None else None
     baseline_report = _bound_analysis_report(
-        baseline_path, baseline, label=analysis_label, tap_id=tap_id
+        baseline_path,
+        baseline,
+        label=analysis_label,
+        tap_id=tap_id,
+        source_label=safe_source_label,
     )
     baseline_lineage = _journal_lineage(baseline)
     baseline_content_sha256 = _normalize_sha256(
@@ -692,7 +725,11 @@ def create_clean_loudness_journal_sweep(
                 "clean loudness sweep drive label does not match declared experiment change"
             )
         candidate_report = _bound_analysis_report(
-            candidate_path, candidate, label=analysis_label, tap_id=tap_id
+            candidate_path,
+            candidate,
+            label=analysis_label,
+            tap_id=tap_id,
+            source_label=safe_source_label,
         )
         sweep_inputs.append((drive, candidate_report))
         candidate_lineage = _journal_lineage(candidate)
@@ -731,7 +768,6 @@ def create_clean_loudness_journal_sweep(
         "mutation_effect_state": "NOT_STARTED",
         "comparison_id": str(baseline.get("comparison_id") or ""),
         "analysis_label": _safe_id(analysis_label),
-        "tap_id": tap_id,
         "drive_change": {
             "target": drive_target,
             "parameter": drive_parameter,
@@ -751,6 +787,10 @@ def create_clean_loudness_journal_sweep(
         "sweep": sweep,
         "created_at_utc": created_at_utc or _utc_now(),
     }
+    if tap_id is not None:
+        payload["tap_id"] = tap_id
+    else:
+        payload["source_label"] = safe_source_label
     return _atomic_write_json(output, payload)
 
 
@@ -769,10 +809,23 @@ def verify_clean_loudness_journal_sweep(path: str | Path) -> dict[str, Any]:
     comparison_id = str(payload.get("comparison_id") or "")
     analysis_label = str(payload.get("analysis_label") or "")
     tap_id = payload.get("tap_id")
+    source_label = payload.get("source_label")
     if not comparison_id or not analysis_label:
         raise CaptureError("clean loudness journal sweep identity is incomplete")
-    if isinstance(tap_id, bool) or not isinstance(tap_id, int):
-        raise CaptureError("clean loudness journal sweep tap_id must be an integer")
+    if tap_id is None and source_label is None:
+        raise CaptureError("clean loudness journal sweep requires tap_id or source_label")
+    if tap_id is not None and source_label is not None:
+        raise CaptureError("clean loudness journal sweep tap_id and source_label are mutually exclusive")
+    if tap_id is not None:
+        if isinstance(tap_id, bool) or not isinstance(tap_id, int):
+            raise CaptureError("clean loudness journal sweep tap_id must be an integer")
+        safe_source_label = None
+    else:
+        if not isinstance(source_label, str) or not source_label.strip():
+            raise CaptureError("clean loudness journal sweep source_label must be a non-empty string")
+        safe_source_label = _safe_id(source_label)
+        if source_label != safe_source_label:
+            raise CaptureError("clean loudness journal sweep source_label is not normalized")
     drive_change = payload.get("drive_change")
     if not isinstance(drive_change, dict):
         raise CaptureError("clean loudness journal sweep drive_change is invalid")
@@ -809,7 +862,11 @@ def verify_clean_loudness_journal_sweep(path: str | Path) -> dict[str, Any]:
         raise CaptureError("clean loudness sweep comparison_id changed")
     baseline_lineage = _journal_lineage(baseline)
     baseline_report = _bound_analysis_report(
-        baseline_path, baseline, label=analysis_label, tap_id=tap_id
+        baseline_path,
+        baseline,
+        label=analysis_label,
+        tap_id=tap_id,
+        source_label=safe_source_label,
     )
     baseline_summary = {
         "experiment_id": baseline_lineage["experiment_id"],
@@ -869,7 +926,11 @@ def verify_clean_loudness_journal_sweep(path: str | Path) -> dict[str, Any]:
                 "clean loudness sweep candidate declared change no longer matches journal"
             )
         candidate_report = _bound_analysis_report(
-            candidate_path, candidate, label=analysis_label, tap_id=tap_id
+            candidate_path,
+            candidate,
+            label=analysis_label,
+            tap_id=tap_id,
+            source_label=safe_source_label,
         )
         lineage = _journal_lineage(candidate)
         expected = {

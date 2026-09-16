@@ -25,6 +25,8 @@ def _write_capture_manifest(
     *,
     experiment_id: str,
     content_sha256: str,
+    tap_id: int = 1,
+    source_label: str = "Main",
 ) -> Path:
     payload = {
         "schema_version": 1,
@@ -39,10 +41,10 @@ def _write_capture_manifest(
         },
         "taps": [
             {
-                "tap_id": 1,
-                "source_label": "Main",
+                "tap_id": tap_id,
+                "source_label": source_label,
                 "final": {
-                    "path": f"{experiment_id}__tap-1-Main.wav",
+                    "path": f"{experiment_id}__tap-{tap_id}-{source_label}.wav",
                     "samples": 1365333,
                     "sha256": content_sha256,
                 },
@@ -310,6 +312,8 @@ def _write_sweep_analysis_report(
     integrated_lufs: float,
     true_peak_dbtp: float,
     crest_factor_db: float,
+    tap_id: int = 1,
+    source_label: str = "Main",
 ) -> Path:
     payload = {
         "schema_version": "chibi-audio-capture-analysis/v1",
@@ -318,12 +322,12 @@ def _write_sweep_analysis_report(
         "requested_capabilities": ["audio.loudness", "audio.levels"],
         "taps": [
             {
-                "tap_id": 1,
-                "source_label": "Main",
-                "artifact_path": f"{experiment_id}__tap-1-Main.wav",
+                "tap_id": tap_id,
+                "source_label": source_label,
+                "artifact_path": f"{experiment_id}__tap-{tap_id}-{source_label}.wav",
                 "content_sha256": content_sha256,
                 "analysis": {
-                    "source_name": f"{experiment_id}__tap-1-Main.wav",
+                    "source_name": f"{experiment_id}__tap-{tap_id}-{source_label}.wav",
                     "source_size_bytes": 4096,
                     "requested_capabilities": ["audio.loudness", "audio.levels"],
                     "executed_analyzers": [{"name": "numpy_signal"}],
@@ -349,13 +353,20 @@ def _write_sweep_analysis_report(
     return path
 
 
-def _prepare_sweep_family(tmp_path: Path) -> tuple[Path, list[tuple[float, Path]], list[Path]]:
+def _prepare_sweep_family(
+    tmp_path: Path,
+    *,
+    tap_ids: tuple[int, int, int, int] = (1, 1, 1, 1),
+    source_label: str = "Main",
+) -> tuple[Path, list[tuple[float, Path]], list[Path]]:
     comparison_id = "kiss-master-drive-sweep"
     baseline_hash = "1" * 64
     baseline_capture = _write_capture_manifest(
         tmp_path / "sweep-baseline.capture.json",
         experiment_id="sweep-baseline",
         content_sha256=baseline_hash,
+        tap_id=tap_ids[0],
+        source_label=source_label,
     )
     baseline_analysis = _write_sweep_analysis_report(
         tmp_path / "sweep-baseline.analysis.json",
@@ -364,6 +375,8 @@ def _prepare_sweep_family(tmp_path: Path) -> tuple[Path, list[tuple[float, Path]
         integrated_lufs=-10.0,
         true_peak_dbtp=-1.2,
         crest_factor_db=8.0,
+        tap_id=tap_ids[0],
+        source_label=source_label,
     )
     baseline_journal = create_experiment_journal(
         capture_manifest=baseline_capture,
@@ -385,11 +398,13 @@ def _prepare_sweep_family(tmp_path: Path) -> tuple[Path, list[tuple[float, Path]
     ]
     candidates: list[tuple[float, Path]] = []
     analysis_paths: list[Path] = []
-    for drive_db, experiment_id, content_sha, lufs, true_peak, crest in specs:
+    for candidate_index, (drive_db, experiment_id, content_sha, lufs, true_peak, crest) in enumerate(specs, start=1):
         capture = _write_capture_manifest(
             tmp_path / f"{experiment_id}.capture.json",
             experiment_id=experiment_id,
             content_sha256=content_sha,
+            tap_id=tap_ids[candidate_index],
+            source_label=source_label,
         )
         analysis = _write_sweep_analysis_report(
             tmp_path / f"{experiment_id}.analysis.json",
@@ -398,6 +413,8 @@ def _prepare_sweep_family(tmp_path: Path) -> tuple[Path, list[tuple[float, Path]
             integrated_lufs=lufs,
             true_peak_dbtp=true_peak,
             crest_factor_db=crest,
+            tap_id=tap_ids[candidate_index],
+            source_label=source_label,
         )
         journal = create_experiment_journal(
             capture_manifest=capture,
@@ -475,6 +492,32 @@ def test_journal_sweep_persists_and_recomputes_clean_loudness_knee(tmp_path: Pat
     assert payload["sweep"]["knee"]["last_clean_point"]["drive_db"] == 1.0
     assert payload["sweep"]["knee"]["first_degraded_point"]["drive_db"] == 1.5
 
+
+
+def test_journal_sweep_source_label_supports_session_local_tap_ids(tmp_path: Path) -> None:
+    baseline, candidates, _ = _prepare_sweep_family(
+        tmp_path,
+        tap_ids=(201, 203, 204, 205),
+        source_label="MASTER",
+    )
+    output = tmp_path / "source-label-sweep.json"
+
+    create_clean_loudness_journal_sweep(
+        baseline_journal=baseline,
+        candidates=candidates,
+        analysis_label="optimizer-evidence",
+        source_label="MASTER",
+        drive_target="master:Pro-L 2",
+        drive_parameter="Gain",
+        goal=_sweep_goal(),
+        policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
+        output_path=output,
+    )
+
+    payload = verify_clean_loudness_journal_sweep(output)
+    assert payload["source_label"] == "MASTER"
+    assert "tap_id" not in payload
+    assert [item["drive_db"] for item in payload["candidates"]] == [0.5, 1.0, 1.5]
 
 def test_journal_sweep_verifier_refuses_tampered_sweep_result(tmp_path: Path) -> None:
     baseline, candidates, _ = _prepare_sweep_family(tmp_path)
