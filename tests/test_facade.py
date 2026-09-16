@@ -367,3 +367,43 @@ def test_sidechain_intent_proposal_rejects_invalid_json(tmp_path):
             "propose_sidechain_intents",
             {"capture_analysis": "analysis.json", "source_label": "VOX_POST"},
         )
+
+
+
+def test_sidechain_intent_configuration_routes_one_high_level_command(monkeypatch):
+    observed = {}
+
+    def fake_configure(read, write, **kwargs):
+        observed["read"] = read
+        observed["write"] = write
+        observed["kwargs"] = kwargs
+        return {
+            "effect_state": "STARTED_CONFIRMED",
+            "status": "CONFIGURED",
+            "selected_target_count": 2,
+            "changed_target_count": 2,
+        }
+
+    monkeypatch.setattr("chibi_audio.facade.configure_sidechain_targets", fake_configure)
+    facade = make_facade()
+    result = facade.call(
+        "configure_sidechain_intent",
+        {
+            "source_track_name": "SIDECHAIN",
+            "intent": "ensure_active",
+            "target_track_names": ["VOX", "FX"],
+        },
+    )
+    assert result["selected_target_count"] == 2
+    assert result["changed_target_count"] == 2
+    assert observed["read"] is facade.read
+    assert observed["write"] is facade.write
+    assert observed["kwargs"] == {
+        "source_track_name": "SIDECHAIN",
+        "intent": "ensure_active",
+        "target_track_names": ["VOX", "FX"],
+    }
+    schema = TOOL_SCHEMAS["configure_sidechain_intent"]["inputSchema"]
+    assert schema["required"] == ["source_track_name", "intent"]
+    assert "device_id" not in schema["properties"]
+    assert "device_index" not in schema["properties"]

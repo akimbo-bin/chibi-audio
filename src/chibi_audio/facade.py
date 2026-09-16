@@ -16,6 +16,7 @@ from .control import (
 from .harshness import analyze_harshness
 from .live import LiveBridgeClient, LivePilotWriteClient
 from .sidechain_compare import compare_sidechain_captures
+from .sidechain_configure import configure_sidechain_targets
 from .sidechain_intent import propose_sidechain_intents
 from .sidechain_verify import verify_sidechain_capture
 
@@ -238,6 +239,25 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "configure_sidechain_intent": {
+        "description": (
+            "Configure existing native sidechain consumers from one track-level intent. The command discovers exact Compressor2 targets from the live sidechain graph, preflights every target before mutation, and requires no device ids or manual plugin routing."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["source_track_name", "intent"],
+            "properties": {
+                "source_track_name": {"type": "string", "minLength": 1},
+                "intent": {"enum": ["ensure_active", "ensure_inactive"]},
+                "target_track_names": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "uniqueItems": True,
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
     "set_track_volume": {
         "description": "Set one exact track volume with identity and expected-before-state guards.",
         "inputSchema": {
@@ -436,6 +456,7 @@ class ChibiAudioFacade:
                 self._resolve_artifact(a["artifact"]),
                 window_seconds=float(a.get("window_seconds", 12.0)),
             ),
+            "configure_sidechain_intent": self._configure_sidechain_intent,
             "analyze_harshness_artifact": lambda a: analyze_harshness(
                 self._resolve_artifact(a["artifact"]),
                 top_events=int(a.get("top_events", 12)),
@@ -502,6 +523,16 @@ class ChibiAudioFacade:
             target_labels=None if targets is None else [str(value) for value in targets],
             time_tolerance_seconds=float(args.get("time_tolerance_seconds", 0.08)),
             max_moments_per_pair=int(args.get("max_moments_per_pair", 6)),
+        )
+
+    def _configure_sidechain_intent(self, args: dict[str, Any]) -> dict[str, Any]:
+        targets = args.get("target_track_names")
+        return configure_sidechain_targets(
+            self.read,
+            self.write,
+            source_track_name=str(args["source_track_name"]),
+            intent=str(args["intent"]),
+            target_track_names=None if targets is None else [str(value) for value in targets],
         )
 
     def _track_mixer_state(self, args: dict[str, Any]) -> dict[str, Any]:
