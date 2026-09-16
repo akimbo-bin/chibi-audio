@@ -2,10 +2,12 @@ from __future__ import absolute_import, print_function
 
 from . import bridge as _bridge
 from .bounded_control import BOUNDED_CONTROL_METHODS, install_bounded_control
+from .chibitap_multi import install_chibitap_multi_instance
 from .locator_read import LOCATOR_READ_METHODS, install_locator_read
 
 
 AbletonLiveMCP = _bridge.AbletonLiveMCP
+install_chibitap_multi_instance(AbletonLiveMCP)
 install_bounded_control(AbletonLiveMCP)
 install_locator_read(AbletonLiveMCP)
 

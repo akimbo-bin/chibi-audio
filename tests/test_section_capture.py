@@ -23,7 +23,7 @@ def test_section_capture_plan_is_not_started_and_capture_session_compatible():
     plan = build_section_capture_plan(
         section_map(),
         "drop 1",
-        tap_specs=("1:Main:master", "2:BASS:BASS", "3:DRUMS:DRUMS"),
+        tap_specs=("1:Main:master", "2:BASS_PRE:pre_fx:BASS", "3:DRUMS:DRUMS"),
     )
     assert plan["effect_state"] == "NOT_STARTED"
     assert plan["set_signature"] == "sig-sections"
@@ -32,9 +32,9 @@ def test_section_capture_plan_is_not_started_and_capture_session_compatible():
     assert plan["capture_request"]["end_beat"] == 48.0
     assert plan["capture_request"]["duration_beats"] == 16.0
     assert plan["capture_request"]["taps"] == [
-        {"tap_id": 1, "source_label": "Main", "target": "master"},
-        {"tap_id": 2, "source_label": "BASS", "target": "BASS"},
-        {"tap_id": 3, "source_label": "DRUMS", "target": "DRUMS"},
+        {"tap_id": 1, "source_label": "Main", "target": "master", "signal_point": "post_fx"},
+        {"tap_id": 2, "source_label": "BASS_PRE", "target": "BASS", "signal_point": "pre_fx"},
+        {"tap_id": 3, "source_label": "DRUMS", "target": "DRUMS", "signal_point": "post_fx"},
     ]
     assert plan["ready_to_execute"] is True
 

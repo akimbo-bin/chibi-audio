@@ -103,7 +103,7 @@ The four reusable-analysis tools are a thin seam to the separately owned issue #
 
 It must **not** enumerate bounded mutation tools or `capture_section` while writes are disabled.
 
-With `-AllowWrites`, the reviewed bounded mutation tools become visible and `capture_section` is added. `capture_section` resolves the artist-authored Locator fresh, carries its Set signature into the capture executor, and refuses before any transport/ChibiTap effect if the Set changed after planning.
+With `-AllowWrites`, the reviewed bounded mutation tools become visible and `capture_section` is added. `capture_section` resolves the artist-authored Locator fresh, carries its Set signature into the managed ChibiTap capture executor, and refuses before topology/transport/Capture effects if the Set changed after planning. The managed path prepares exact signal-point taps, captures against the prepared signature, and restores/removes only the topology it temporarily borrowed or created.
 
 No mode exposes arbitrary Python, a shell, a generic Live Object Model caller/setter, raw JSON-RPC, filesystem-wide reads, or mouse/keyboard control.
 

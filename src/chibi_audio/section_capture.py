@@ -31,6 +31,6 @@ def build_section_capture_plan(
         },
         "ready_to_execute": bool(taps) and end_beat > start_beat,
         "execution_note": (
-            "Pass the capture_request beat range and tap mapping to the typed capture-session executor only after explicit write authority."
+            "Pass the capture_request beat range and tap mapping to the managed ChibiTap capture executor only after explicit write authority."
         ),
     }

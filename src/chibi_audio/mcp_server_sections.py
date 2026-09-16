@@ -8,7 +8,8 @@ from pydantic import Field
 from .analysis_bridge import AnalysisFabricBridge
 from .analysis_mcp import AnalysisCapabilityList, AnalysisCostName, register_analysis_tools
 from .capture import _safe_id
-from .capture_session import parse_session_tap, run_capture_session
+from .capture_session import parse_session_tap
+from .managed_capture import run_managed_capture_session
 from .facade import ChibiAudioFacade
 from .locator_client import LocatorBridgeClient
 from .mcp_server import (
@@ -222,7 +223,7 @@ def build_mcp_server(
                     raise ValueError("locator read did not return a Set signature")
                 safe_experiment = _safe_id(experiment_id)
                 output_dir = settings.artifact_root / "section-captures" / safe_experiment
-                manifest_path = run_capture_session(
+                capture_result = run_managed_capture_session(
                     experiment_id=safe_experiment,
                     taps=[parse_session_tap(value) for value in tap_specs],
                     output_dir=output_dir,
@@ -232,13 +233,18 @@ def build_mcp_server(
                     port=settings.live_port,
                     include_analysis=include_analysis,
                     expected_set_signature=set_signature,
+                    remove_created_after=True,
                 )
+                manifest_path = capture_result.manifest_path
                 manifest = manifest_path.resolve()
                 root = settings.artifact_root.resolve()
                 relative_manifest = manifest.relative_to(root)
                 return {
                     "effect_state": "STARTED_CONFIRMED",
                     "set_signature": set_signature,
+                    "prepared_set_signature": capture_result.topology.final_set_signature,
+                    "topology": capture_result.topology.as_dict(),
+                    "restore": capture_result.restore,
                     "section": plan["section"],
                     "capture_request": plan["capture_request"],
                     "manifest_artifact": relative_manifest.as_posix(),

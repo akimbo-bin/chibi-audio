@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -111,14 +112,21 @@ def test_plan_section_capture_is_read_only_and_returns_capture_session_payload(t
 def test_capture_section_is_write_gated_and_forwards_planned_signature(monkeypatch, tmp_path):
     calls = {}
 
-    def fake_run_capture_session(**kwargs):
+    def fake_run_managed_capture_session(**kwargs):
         calls.update(kwargs)
         target = Path(kwargs["output_dir"]) / "capture-manifest.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("{}\n", encoding="utf-8")
-        return target
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {"initial_set_signature": "sig-locators", "final_set_signature": "sig-prepared", "taps": []},
+            ),
+            restore={"final_set_signature": "sig-locators", "remove_created": True, "actions": []},
+        )
 
-    monkeypatch.setattr(section_server, "run_capture_session", fake_run_capture_session)
+    monkeypatch.setattr(section_server, "run_managed_capture_session", fake_run_managed_capture_session)
     server, _locator = make_server(tmp_path, allow_writes=True)
     tools = tool_map(server)
     assert "capture_section" in tools
@@ -137,8 +145,11 @@ def test_capture_section_is_write_gated_and_forwards_planned_signature(monkeypat
     )
     data = result.structured_content
     assert calls["expected_set_signature"] == "sig-locators"
+    assert calls["remove_created_after"] is True
     assert calls["start_beat"] == 32.0
     assert calls["end_beat"] == 48.0
     assert [tap.target for tap in calls["taps"]] == ["master", "BASS", "DRUMS"]
     assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["prepared_set_signature"] == "sig-prepared"
+    assert data["restore"]["final_set_signature"] == "sig-locators"
     assert data["manifest_artifact"] == "section-captures/kiss-drop-1/capture-manifest.json"

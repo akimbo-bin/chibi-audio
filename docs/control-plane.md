@@ -37,11 +37,11 @@ This is intentionally beat-based. Beat boundaries remain valid under tempo autom
 
 A section-capture plan does not arm ChibiTap, seek transport, start playback or write the Set. It carries the fresh locator Set signature so execution can be fenced to the exact observed Arrangement state.
 
-When MCP writes are explicitly enabled, `capture_section` is also registered. It resolves the named section fresh, validates the requested ChibiTap target specs, then calls the existing typed capture-session executor with the exact `start_beat`, `end_beat` and `expected_set_signature`. The executor rereads the Set and refuses **before any transport or ChibiTap effect** if that signature no longer matches. Only after the finalized manifest exists below the configured artifact root does the MCP call return `effect_state: STARTED_CONFIRMED`.
+When MCP writes are explicitly enabled, `capture_section` is also registered. It resolves the named section fresh, validates the requested ChibiTap target specs, then calls the capture-owned managed lifecycle with the exact `start_beat`, `end_beat` and planned `expected_set_signature`. The managed executor prepares/reuses exact ChibiTap signal points, captures against the prepared Set signature, restores borrowed Tap IDs, and removes only disposable taps it created. A stale planned Set is refused before topology, transport, or Capture effects. Only after the finalized manifest exists below the configured artifact root and topology restore completes does the MCP call return `effect_state: STARTED_CONFIRMED`.
 
 The resulting downstream command path is straightforward: a worker can resolve or plan `Drop 1`, choose Main/BASS/DRUMS taps and, only with explicit write authority, capture that exact artist-authored section without guessing boundaries from the waveform or hard-coding bar numbers in chat history.
 
-The `capture_section` path is host-independent-test proven but has not yet been exercised against the active KISSKISSKISS Live Set while another worker owns that session.
+The `capture_section` path is host-independent-test proven against the managed lifecycle. Real-Live Locator -> managed-capture proof remains the acceptance boundary before this draft is ready.
 
 ## Reversible diagnostic audition
 
