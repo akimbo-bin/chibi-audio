@@ -165,6 +165,7 @@ def resolve_session_taps(
 ) -> list[ResolvedSessionTap]:
     resolved: list[ResolvedSessionTap] = []
     used_ids: set[int] = set()
+    used_device_ids: set[int] = set()
     type_cache: dict[int, int] = {}
     tracks = list(summary.get("tracks") or [])
     master = summary.get("master_track") or {}
@@ -189,29 +190,36 @@ def resolve_session_taps(
             track_index = int(track["index"])
 
         devices = list(track.get("devices") or [])
-        matches = [
-            (index, device)
-            for index, device in enumerate(devices)
-            if device.get("name") == "ChibiTap"
-        ]
-        if len(matches) != 1:
-            raise CaptureError(
-                f"{track.get('name')!r} must contain exactly one ChibiTap; found {len(matches)}"
-            )
-        device_index, tap = matches[0]
         expected_index = _expected_signal_point_index(
             read_client,
             devices,
             spec.signal_point,
             type_cache,
         )
-        if device_index != expected_index:
+        if expected_index < 0 or expected_index >= len(devices):
             raise CaptureError(
-                f"ChibiTap signal-point mismatch on {track.get('name')!r}: "
-                f"{spec.signal_point} expected index {expected_index}, found {device_index}"
+                f"ChibiTap signal point {spec.signal_point!r} resolved outside the device chain "
+                f"on {track.get('name')!r}"
             )
+        tap = devices[expected_index]
+        if tap.get("name") != "ChibiTap":
+            raise CaptureError(
+                f"ChibiTap is not installed at {spec.signal_point} on {track.get('name')!r}; "
+                f"expected index {expected_index}, found {tap.get('name')!r}"
+            )
+        if tap.get("id") is None:
+            raise CaptureError(
+                f"ChibiTap at {spec.signal_point} on {track.get('name')!r} is missing an object id"
+            )
+        device_id = int(tap["id"])
+        if device_id in used_device_ids:
+            raise CaptureError(
+                f"session signal points resolve to the same ChibiTap device on {track.get('name')!r}; "
+                "use one tap for topologically equivalent signal points"
+            )
+        used_device_ids.add(device_id)
 
-        params = _parameters_by_name(read_client, int(tap["id"]))
+        params = _parameters_by_name(read_client, device_id)
         capture = params.get("Capture")
         tap_id_param = params.get("Tap ID")
         if capture is None or tap_id_param is None:
@@ -221,7 +229,7 @@ def resolve_session_taps(
             # after a prior session disarms a tap. Re-read once before refusing the
             # next session; never mutate an unexpectedly armed tap automatically.
             time.sleep(0.2)
-            params = _parameters_by_name(read_client, int(tap["id"]))
+            params = _parameters_by_name(read_client, device_id)
             capture = params.get("Capture")
             tap_id_param = params.get("Tap ID")
             if capture is None or tap_id_param is None:
@@ -234,7 +242,8 @@ def resolve_session_taps(
             raise CaptureError(f"ChibiTap Tap ID is unreadable for {track.get('name')!r}") from exc
         if observed_tap_id != spec.tap_id:
             raise CaptureError(
-                f"ChibiTap Tap ID mismatch on {track.get('name')!r}: {observed_tap_id} != {spec.tap_id}"
+                f"ChibiTap Tap ID mismatch on {track.get('name')!r} at {spec.signal_point}: "
+                f"{observed_tap_id} != {spec.tap_id}"
             )
 
         resolved.append(
@@ -246,8 +255,8 @@ def resolve_session_taps(
                 track_name=str(track.get("name") or ""),
                 track_index=track_index,
                 track_id=int(track["id"]),
-                device_id=int(tap["id"]),
-                device_index=device_index,
+                device_id=device_id,
+                device_index=expected_index,
             )
         )
 
