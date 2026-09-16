@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .als import dumps_report, inspect_set
+from .ab_compare import create_level_matched_ab
 from .audio import analyze_audio
 from .harshness import analyze_harshness
 from .capture import CaptureError
@@ -63,6 +64,13 @@ def main() -> None:
     harshness = sub.add_parser("analyze-harshness", help="Rank time-localized bright/attack-heavy events")
     harshness.add_argument("path")
     harshness.add_argument("--top-events", type=int, default=12)
+    level_match = sub.add_parser("level-match-ab", help="Create downward-only integrated-loudness-matched A/B listening artifacts")
+    level_match.add_argument("left")
+    level_match.add_argument("right")
+    level_match.add_argument("--output-dir", required=True)
+    level_match.add_argument("--comparison-id", required=True)
+    level_match.add_argument("--left-label", default="A")
+    level_match.add_argument("--right-label", default="B")
 
     finalize = sub.add_parser(
         "finalize-capture",
@@ -124,6 +132,16 @@ def main() -> None:
         print(json.dumps(analyze_audio(args.path, window_seconds=args.window_seconds), indent=2, ensure_ascii=False))
     elif args.command == "analyze-harshness":
         print(json.dumps(analyze_harshness(args.path, top_events=args.top_events), indent=2, ensure_ascii=False))
+    elif args.command == "level-match-ab":
+        manifest_path = create_level_matched_ab(
+            left=args.left,
+            right=args.right,
+            output_dir=args.output_dir,
+            comparison_id=args.comparison_id,
+            left_label=args.left_label,
+            right_label=args.right_label,
+        )
+        print(manifest_path.read_text(encoding="utf-8"), end="")
     elif args.command == "finalize-capture":
         manifest_path = finalize_aligned_captures(
             experiment_id=args.experiment_id,

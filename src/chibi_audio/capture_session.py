@@ -365,6 +365,49 @@ def _newest_new_file(root: Path, tap_id: int, before: set[Path]) -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
 
 
+def _new_capture_snapshot(
+    root: Path,
+    resolved: Iterable[ResolvedSessionTap],
+    before: dict[int, set[Path]],
+) -> dict[int, tuple[Path, int]]:
+    snapshot: dict[int, tuple[Path, int]] = {}
+    for tap in resolved:
+        candidates = [path for path in _files_for_tap(root, tap.tap_id) if path not in before[tap.tap_id]]
+        if not candidates:
+            continue
+        path = max(candidates, key=lambda item: item.stat().st_mtime_ns)
+        snapshot[tap.tap_id] = (path, path.stat().st_size)
+    return snapshot
+
+
+def _wait_for_capture_quiescence(
+    root: Path,
+    resolved: Iterable[ResolvedSessionTap],
+    before: dict[int, set[Path]],
+    *,
+    timeout: float,
+    poll_interval: float,
+    minimum_bytes: int = 45,
+    quiet_seconds: float = 0.35,
+) -> dict[int, tuple[Path, int]]:
+    taps = list(resolved)
+    minimum_bytes = max(45, int(minimum_bytes))
+    deadline = time.monotonic() + timeout
+    last_snapshot: dict[int, tuple[Path, int]] | None = None
+    last_change = time.monotonic()
+    while time.monotonic() < deadline:
+        snapshot = _new_capture_snapshot(root, taps, before)
+        if len(snapshot) == len(taps) and all(size >= minimum_bytes for _path, size in snapshot.values()):
+            now = time.monotonic()
+            if last_snapshot != snapshot:
+                last_snapshot = snapshot
+                last_change = now
+            elif now - last_change >= quiet_seconds:
+                return snapshot
+        time.sleep(poll_interval)
+    raise CaptureError("ChibiTap capture artifacts did not become quiescent before timeout")
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -455,22 +498,27 @@ def run_capture_session(
         play_started = True
         transport_start = float(play.get("scheduled_start_time", start_beat))
 
-        deadline = time.monotonic() + expected_seconds + timeout_margin
-        while True:
-            if time.monotonic() > deadline:
-                raise CaptureError("Live transport did not stop at the requested end beat before timeout")
-            time.sleep(poll_interval)
-            status = capture_client.transport("status", expected_set_signature=set_signature)
-            if bool(status.get("playing")):
-                continue
-            observed_stop = status.get("last_scheduled_stop_time")
-            if observed_stop is None:
-                observed_stop = status.get("time", end_beat)
-            transport_stop = float(observed_stop)
-            play_started = False
-            if transport_stop + 1.0e-6 < float(end_beat):
-                raise CaptureError("Live transport stopped before requested end beat")
-            break
+        _wait_for_capture_quiescence(
+            root,
+            resolved,
+            before,
+            timeout=expected_seconds + timeout_margin,
+            poll_interval=poll_interval,
+            # ChibiTap writes 48 kHz stereo float32 WAV. Requiring at least the
+            # requested payload size avoids mistaking a barely-created/partial
+            # file for a completed short capture when no growth was observed.
+            minimum_bytes=target_samples * 2 * 4,
+        )
+        status = capture_client.transport("status", expected_set_signature=set_signature)
+        if bool(status.get("playing")):
+            raise CaptureError("ChibiTap artifacts stopped growing while Live transport still reported playing")
+        observed_stop = status.get("last_scheduled_stop_time")
+        if observed_stop is None:
+            observed_stop = status.get("time", end_beat)
+        transport_stop = float(observed_stop)
+        play_started = False
+        if transport_stop + 1.0e-6 < float(end_beat):
+            raise CaptureError("Live transport stopped before requested end beat")
     finally:
         if play_started:
             try:

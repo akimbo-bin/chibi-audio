@@ -222,11 +222,13 @@ def finalize_aligned_captures(
             channels=channels,
         )
         cropped_info = probe_audio_file(output_path)
+        final_record = {**cropped_info, **cropped_artifact.as_dict()}
+        final_record["path"] = output_path.relative_to(destination).as_posix()
         entry: dict[str, Any] = {
             "tap_id": item.tap_id,
             "source_label": item.source_label,
             "raw": {**raw_info, **raw_artifact.as_dict()},
-            "final": {**cropped_info, **cropped_artifact.as_dict()},
+            "final": final_record,
         }
         if analyze_audio is not None:
             entry["analysis"] = analyze_audio(output_path, sample_rate=sample_rate)

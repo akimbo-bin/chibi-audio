@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -92,7 +93,10 @@ def test_finalize_aligned_captures_crops_exact_samples_and_manifest(tmp_path):
     assert [tap["tap_id"] for tap in manifest["taps"]] == [1, 2]
 
     for tap in manifest["taps"]:
-        final = probe_audio_file(tap["final"]["path"])
+        recorded_path = Path(tap["final"]["path"])
+        assert not recorded_path.is_absolute()
+        assert recorded_path.parent == Path(".")
+        final = probe_audio_file(manifest_path.parent / recorded_path)
         assert final["samples"] == 12000
         assert final["sample_rate"] == 48000
         assert final["channels"] == 2
