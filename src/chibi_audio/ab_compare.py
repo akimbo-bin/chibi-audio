@@ -222,6 +222,14 @@ def create_level_matched_ab(
         left_output_probe = _verify_render_shape(left_temp, left_probe, sample_count)
         right_output_probe = _verify_render_shape(right_temp, right_probe, sample_count)
         left_after = _loudness_measurement(left_temp, service)
+        left_output_probe = {
+            **left_output_probe,
+            "path": left_output.relative_to(destination).as_posix(),
+        }
+        right_output_probe = {
+            **right_output_probe,
+            "path": right_output.relative_to(destination).as_posix(),
+        }
         right_after = _loudness_measurement(right_temp, service)
         mismatch_lu = abs(left_after["integrated_lufs"] - right_after["integrated_lufs"])
         if mismatch_lu > verification_tolerance_lu:
@@ -289,9 +297,17 @@ def create_level_matched_ab(
         _atomic_write_json(manifest_path, payload)
         return manifest_path
     except Exception:
-        for temp in (left_temp, right_temp):
+        cleanup = (
+            left_temp,
+            right_temp,
+            left_output,
+            right_output,
+            manifest_path,
+            manifest_path.with_suffix(manifest_path.suffix + ".tmp"),
+        )
+        for artifact in cleanup:
             try:
-                temp.unlink()
+                artifact.unlink()
             except FileNotFoundError:
                 pass
         raise

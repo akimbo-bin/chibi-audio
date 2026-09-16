@@ -83,6 +83,7 @@ def test_create_level_matched_ab_is_downward_only_aligned_and_non_destructive(tm
         assert variant["level_matched"]["sha256"] == _sha256(output)
         assert variant["level_matched"]["probe"]["samples"] == 96000
         assert "flt" in variant["level_matched"]["probe"]["sample_fmt"]
+        assert variant["level_matched"]["probe"]["path"] == variant["level_matched"]["path"]
 
     with pytest.raises(LevelMatchedAbError, match="refusing to overwrite"):
         create_level_matched_ab(
@@ -133,3 +134,30 @@ def test_create_level_matched_ab_refuses_same_source_or_colliding_labels(tmp_pat
             left_label="A B",
             right_label="A-B",
         )
+
+
+def test_create_level_matched_ab_cleans_outputs_if_manifest_write_fails(monkeypatch, tmp_path: Path) -> None:
+    _require_ffmpeg()
+    import chibi_audio.ab_compare as ab
+
+    left = _write_stereo_tone(tmp_path / "left.wav", amplitude=0.5)
+    right = _write_stereo_tone(tmp_path / "right.wav", amplitude=0.25)
+    output_dir = tmp_path / "ab"
+
+    def fail_manifest_write(*_args, **_kwargs):
+        raise RuntimeError("manifest write failed")
+
+    monkeypatch.setattr(ab, "_atomic_write_json", fail_manifest_write)
+
+    with pytest.raises(RuntimeError, match="manifest write failed"):
+        ab.create_level_matched_ab(
+            left=left,
+            right=right,
+            output_dir=output_dir,
+            comparison_id="cleanup-proof",
+            left_label="candidate",
+            right_label="baseline",
+        )
+
+    assert output_dir.is_dir()
+    assert list(output_dir.iterdir()) == []
