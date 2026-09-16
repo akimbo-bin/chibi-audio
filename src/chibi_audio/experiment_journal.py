@@ -30,8 +30,8 @@ class ExperimentChange:
         if not self.parameter.strip():
             raise CaptureError("change parameter must not be empty")
         try:
-            json.dumps(self.before)
-            json.dumps(self.after)
+            json.dumps(self.before, allow_nan=False)
+            json.dumps(self.after, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise CaptureError("change before/after values must be JSON serializable") from exc
 
@@ -75,7 +75,7 @@ def _sha256(path: Path) -> str:
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
     temp.replace(path)
     return path
 
@@ -87,8 +87,32 @@ def _validate_capture_manifest(manifest: dict[str, Any]) -> None:
         raise CaptureError("capture manifest is missing experiment_id")
     if not isinstance(manifest.get("requested_range"), dict):
         raise CaptureError("capture manifest is missing requested_range")
-    if not isinstance(manifest.get("taps"), list) or not manifest["taps"]:
+    taps = manifest.get("taps")
+    if not isinstance(taps, list) or not taps:
         raise CaptureError("capture manifest must contain at least one tap")
+
+    seen_tap_ids: set[int] = set()
+    for entry in taps:
+        if not isinstance(entry, dict):
+            raise CaptureError("capture manifest tap entry must be an object")
+        tap_id = entry.get("tap_id")
+        if isinstance(tap_id, bool) or not isinstance(tap_id, int):
+            raise CaptureError("capture manifest tap_id must be an integer")
+        if tap_id in seen_tap_ids:
+            raise CaptureError(f"capture manifest contains duplicate tap_id: {tap_id}")
+        seen_tap_ids.add(tap_id)
+
+        final = entry.get("final")
+        if not isinstance(final, dict):
+            raise CaptureError(f"capture manifest tap {tap_id} has no finalized artifact")
+        if not str(final.get("path") or "").strip():
+            raise CaptureError(f"capture manifest tap {tap_id} finalized artifact has no path")
+        digest = final.get("sha256")
+        if not isinstance(digest, str):
+            raise CaptureError(f"capture manifest tap {tap_id} finalized artifact has no valid SHA-256")
+        normalized = digest.lower()
+        if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+            raise CaptureError(f"capture manifest tap {tap_id} finalized artifact has no valid SHA-256")
 
 
 def _relative_reference(target: Path, base: Path) -> str:
@@ -111,6 +135,8 @@ def create_experiment_journal(
 ) -> Path:
     manifest_path = Path(capture_manifest)
     output = Path(output_path)
+    if manifest_path.resolve() == output.resolve():
+        raise CaptureError("experiment journal output_path must not overwrite the bound capture manifest")
     manifest = _load_json_object(manifest_path)
     _validate_capture_manifest(manifest)
 

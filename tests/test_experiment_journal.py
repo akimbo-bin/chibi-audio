@@ -30,7 +30,11 @@ def _write_capture_manifest(path: Path, *, experiment_id: str = "drop-a") -> Pat
             {
                 "tap_id": 1,
                 "source_label": "Main",
-                "final": {"path": "drop-a__tap-1-Main.wav", "samples": 170667},
+                "final": {
+                    "path": "drop-a__tap-1-Main.wav",
+                    "samples": 170667,
+                    "sha256": "a" * 64,
+                },
             }
         ],
         "live_session": {
@@ -169,3 +173,45 @@ def test_invalid_roles_decisions_and_changes_fail_closed(tmp_path: Path) -> None
     )
     with pytest.raises(CaptureError, match="decision status"):
         append_experiment_decision(journal_path, status="best")
+
+
+def test_create_refuses_unfinalized_capture_manifest(tmp_path: Path) -> None:
+    capture = _write_capture_manifest(tmp_path / "capture.json")
+    payload = json.loads(capture.read_text(encoding="utf-8"))
+    del payload["taps"][0]["final"]["sha256"]
+    capture.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(CaptureError, match="valid SHA-256"):
+        create_experiment_journal(
+            capture_manifest=capture,
+            output_path=tmp_path / "journal.json",
+            comparison_id="unfinalized",
+            variant_role="baseline",
+            hypothesis="Only finalized capture evidence may be journaled.",
+        )
+
+
+def test_create_refuses_overwriting_bound_capture_manifest(tmp_path: Path) -> None:
+    capture = _write_capture_manifest(tmp_path / "capture.json")
+    original = capture.read_bytes()
+
+    with pytest.raises(CaptureError, match="must not overwrite"):
+        create_experiment_journal(
+            capture_manifest=capture,
+            output_path=capture,
+            comparison_id="collision",
+            variant_role="baseline",
+            hypothesis="The journal must never replace the evidence it binds.",
+        )
+
+    assert capture.read_bytes() == original
+
+
+def test_change_refuses_non_finite_json_values() -> None:
+    with pytest.raises(CaptureError, match="JSON serializable"):
+        ExperimentChange(
+            target="track:BASS",
+            parameter="Mixer Volume",
+            before=float("nan"),
+            after=0.5,
+        )

@@ -35,6 +35,8 @@ That is necessary but insufficient for an iterative mix/master loop. The optimiz
 
 `verify_experiment_journal(...)` re-hashes the bound manifest and refuses the journal if the manifest bytes or experiment identity changed. The journal therefore cannot silently drift away from the audio evidence it describes.
 
+Creation also requires a genuinely finalized capture manifest: every tap must have a unique integer Tap ID plus a finalized artifact path and valid SHA-256. The journal output path is refused if it resolves to the capture manifest itself, so provenance creation cannot overwrite the evidence it is binding.
+
 ## Variant contract
 
 A journal has one `comparison_id` and one role:
@@ -53,6 +55,8 @@ Each declared change records:
 - optional unit.
 
 These are provenance claims, not proof that a Live mutation succeeded. Higher-level control code should populate them from read-back-verified parameter snapshots when available.
+
+Declared before/after values must be strict JSON values; non-finite numeric values such as `NaN` or infinity are refused rather than emitting implementation-specific JSON.
 
 ## Decision contract
 
