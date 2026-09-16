@@ -536,3 +536,20 @@ def test_journal_sweep_refuses_overwriting_bound_journal(tmp_path: Path) -> None
             policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
             output_path=candidates[0][1],
         )
+
+
+def test_journal_sweep_refuses_invalid_drive_before_writing_output(tmp_path: Path) -> None:
+    baseline, candidates, _ = _prepare_sweep_family(tmp_path)
+    output = tmp_path / "invalid-drive.json"
+
+    with pytest.raises(CaptureError, match="candidate drive"):
+        create_clean_loudness_journal_sweep(
+            baseline_journal=baseline,
+            candidates=[("loud", candidates[0][1])],  # type: ignore[list-item]
+            analysis_label="optimizer-evidence",
+            tap_id=1,
+            goal=_sweep_goal(),
+            policy=CleanLoudnessSweepPolicy(max_points=1, min_marginal_lu_per_db=0.5),
+            output_path=output,
+        )
+    assert not output.exists()
