@@ -14,9 +14,19 @@ class CaptureManifestAnalysisError(ValueError):
 
 def _resolve_artifact_path(manifest_path: Path, value: str) -> Path:
     path = Path(value)
-    if not path.is_absolute():
-        path = manifest_path.parent / path
-    return path
+    if path.is_absolute():
+        return path
+    manifest_relative = manifest_path.parent / path
+    if manifest_relative.is_file():
+        return manifest_relative
+    # Backward compatibility for early capture-session manifests that recorded
+    # paths relative to the coordinator's working directory instead of the
+    # manifest directory. Only accept this fallback when it resolves to a real
+    # file so missing-artifact errors still point at the canonical candidate.
+    legacy_cwd_relative = Path.cwd() / path
+    if legacy_cwd_relative.is_file():
+        return legacy_cwd_relative
+    return manifest_relative
 
 
 def _validate_digest(value: object, tap_id: int) -> str:
