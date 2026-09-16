@@ -15,6 +15,7 @@ READ_ONLY_TOOLS = {
     "analyze_audio",
     "analyze_capture_manifest",
     "analyze_harshness_artifact",
+    "attribute_master_stress",
     "compare_analysis_reports",
     "device_parameters",
     "diff_parameter_snapshots",

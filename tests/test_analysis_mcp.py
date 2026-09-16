@@ -54,6 +54,10 @@ class FakeAnalysisBridge:
         self.calls.append(("manifest", manifest, tuple(capabilities), kwargs))
         return {"capture_manifest": manifest, "requested_capabilities": list(capabilities)}
 
+    def attribute_capture_master_stress(self, manifest, **kwargs):
+        self.calls.append(("stress", manifest, kwargs))
+        return {"capture_manifest": manifest, "effect_state": "NOT_STARTED", "sources": []}
+
     def compare_reports(self, left, right, **kwargs):
         self.calls.append(("compare", left, right, kwargs))
         return {"direction": "right_minus_left", **kwargs}
@@ -81,6 +85,7 @@ def test_analysis_tools_are_present_and_read_only(tmp_path):
         "list_audio_analyzers",
         "analyze_audio",
         "analyze_capture_manifest",
+        "attribute_master_stress",
         "compare_analysis_reports",
         "plan_section_evidence",
     ):
@@ -130,6 +135,43 @@ def test_analysis_tools_forward_explicit_scope_and_cost(tmp_path):
         ("audio.levels",),
     )
     assert bridge.calls[-1][3] == {"tap_ids": [1, 3], "max_cost": "CHEAP"}
+
+
+def test_master_stress_tool_is_read_only_and_forwards_explicit_labels(tmp_path):
+    server, bridge = make_server(tmp_path)
+    result = asyncio.run(
+        server.call_tool(
+            "attribute_master_stress",
+            {
+                "manifest": "section-captures/drop/manifest.json",
+                "premaster_label": "MASTER_PRE",
+                "master_label": "MASTER_POST",
+                "source_labels": ["BASS", "DRUMS"],
+                "window_ms": 80.0,
+                "hop_ms": 10.0,
+                "max_latency_ms": 250.0,
+                "low_band_hz": 180.0,
+                "active_threshold_dbfs": -50.0,
+                "top_stress_fraction": 0.2,
+            },
+        )
+    )
+    assert result.structured_content["effect_state"] == "NOT_STARTED"
+    assert bridge.calls[-1] == (
+        "stress",
+        "section-captures/drop/manifest.json",
+        {
+            "premaster_label": "MASTER_PRE",
+            "master_label": "MASTER_POST",
+            "source_labels": ["BASS", "DRUMS"],
+            "window_ms": 80.0,
+            "hop_ms": 10.0,
+            "max_latency_ms": 250.0,
+            "low_band_hz": 180.0,
+            "active_threshold_dbfs": -50.0,
+            "top_stress_fraction": 0.2,
+        },
+    )
 
 
 def test_compare_reports_does_not_reopen_audio(tmp_path):
