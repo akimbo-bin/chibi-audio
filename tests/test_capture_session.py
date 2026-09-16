@@ -271,6 +271,33 @@ def test_resolve_session_taps_rechecks_transient_stale_capture_state(monkeypatch
     assert reader.main_capture_reads == 2
 
 
+def test_wait_for_capture_quiescence_uses_file_growth(monkeypatch, tmp_path):
+    import chibi_audio.capture_session as session
+
+    tap = CaptureSessionTap(1, "Main", "master")
+    path = tmp_path / "chibitap-tap-1-proof.wav"
+    snapshots = iter([
+        {1: (path, 44)},
+        {1: (path, 1024)},
+        {1: (path, 1024)},
+        {1: (path, 1024)},
+    ])
+    times = iter([0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.5, 0.5])
+    monkeypatch.setattr(session, "_new_capture_snapshot", lambda *_args, **_kwargs: next(snapshots))
+    monkeypatch.setattr(session.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(session.time, "sleep", lambda _seconds: None)
+
+    result = session._wait_for_capture_quiescence(
+        tmp_path,
+        [tap],
+        {1: set()},
+        timeout=1.0,
+        poll_interval=0.01,
+        quiet_seconds=0.35,
+    )
+    assert result[1][1] == 1024
+
+
 def test_run_capture_session_coordinates_same_track_pre_post_and_records_provenance(monkeypatch, tmp_path):
     import chibi_audio.capture_session as session
 
@@ -297,6 +324,7 @@ def test_run_capture_session_coordinates_same_track_pre_post_and_records_provena
     monkeypatch.setattr(session, "LiveBridgeClient", lambda **_kwargs: reader)
     monkeypatch.setattr(session, "LiveCaptureClient", FakeCaptureClient)
     monkeypatch.setattr(session.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(session, "_wait_for_capture_quiescence", lambda *_args, **_kwargs: {})
 
     raw_paths = {
         1: tmp_path / "raw-main.wav",
