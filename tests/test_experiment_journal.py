@@ -8,6 +8,7 @@ import pytest
 from chibi_audio.capture import CaptureError
 from chibi_audio.experiment_journal import (
     ExperimentChange,
+    attach_capture_analysis_report,
     append_experiment_decision,
     create_experiment_journal,
     verify_experiment_journal,
@@ -44,6 +45,43 @@ def _write_capture_manifest(path: Path, *, experiment_id: str = "drop-a") -> Pat
                 "file_path": "C:/Lab/KISSKISSKISS.als",
             },
         },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _write_capture_analysis_report(
+    path: Path,
+    *,
+    experiment_id: str = "drop-a",
+    tap_id: int = 1,
+    content_sha256: str = "a" * 64,
+) -> Path:
+    payload = {
+        "schema_version": "chibi-audio-capture-analysis/v1",
+        "capture_manifest": "capture.json",
+        "experiment_id": experiment_id,
+        "requested_capabilities": ["audio.levels", "audio.spectrum"],
+        "taps": [
+            {
+                "tap_id": tap_id,
+                "source_label": "Main",
+                "artifact_path": "drop-a__tap-1-Main.wav",
+                "content_sha256": content_sha256,
+                "analysis": {
+                    "source_name": "drop-a__tap-1-Main.wav",
+                    "source_size_bytes": 100,
+                    "requested_capabilities": ["audio.levels", "audio.spectrum"],
+                    "executed_analyzers": [{"name": "numpy_signal"}],
+                    "measurements": {"audio.levels": {"rms_dbfs": -12.0}},
+                    "content_sha256": content_sha256,
+                    "analysis_key": "b" * 64,
+                    "cache_hit": False,
+                    "schema_version": "chibi-audio-analysis/v1",
+                    "diagnostics": [],
+                },
+            }
+        ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
@@ -215,3 +253,104 @@ def test_change_refuses_non_finite_json_values() -> None:
             before=float("nan"),
             after=0.5,
         )
+
+
+def test_attach_analysis_report_binds_exact_capture_audio_identity(tmp_path: Path) -> None:
+    capture = _write_capture_manifest(tmp_path / "capture.json")
+    report = _write_capture_analysis_report(tmp_path / "analysis.json")
+    journal_path = create_experiment_journal(
+        capture_manifest=capture,
+        output_path=tmp_path / "baseline.json",
+        comparison_id="analysis-binding",
+        variant_role="baseline",
+        hypothesis="Keep analysis evidence bound to the exact finalized capture bytes.",
+    )
+
+    attach_capture_analysis_report(
+        journal_path,
+        analysis_report=report,
+        label="moderate evidence",
+        attached_at_utc="2026-09-15T20:04:00+00:00",
+    )
+    journal = verify_experiment_journal(journal_path)
+    bindings = journal["evidence"]["analysis_reports"]
+    assert len(bindings) == 1
+    binding = bindings[0]
+    assert binding["label"] == "moderate-evidence"
+    assert binding["report_path"] == "analysis.json"
+    assert len(binding["report_sha256"]) == 64
+    assert binding["schema_version"] == "chibi-audio-capture-analysis/v1"
+    assert binding["experiment_id"] == "drop-a"
+    assert binding["requested_capabilities"] == ["audio.levels", "audio.spectrum"]
+    assert binding["taps"] == [
+        {
+            "tap_id": 1,
+            "source_label": "Main",
+            "content_sha256": "a" * 64,
+            "analysis_key": "b" * 64,
+        }
+    ]
+
+
+def test_attach_analysis_report_refuses_unrelated_capture_audio(tmp_path: Path) -> None:
+    capture = _write_capture_manifest(tmp_path / "capture.json")
+    report = _write_capture_analysis_report(
+        tmp_path / "analysis.json",
+        content_sha256="c" * 64,
+    )
+    journal_path = create_experiment_journal(
+        capture_manifest=capture,
+        output_path=tmp_path / "baseline.json",
+        comparison_id="analysis-mismatch",
+        variant_role="baseline",
+        hypothesis="Unrelated analysis must never be attached to this capture.",
+    )
+
+    with pytest.raises(CaptureError, match="does not match bound capture artifact"):
+        attach_capture_analysis_report(
+            journal_path,
+            analysis_report=report,
+            label="wrong audio",
+        )
+    assert verify_experiment_journal(journal_path)["evidence"]["analysis_reports"] == []
+
+
+def test_verify_refuses_tampered_bound_analysis_report(tmp_path: Path) -> None:
+    capture = _write_capture_manifest(tmp_path / "capture.json")
+    report = _write_capture_analysis_report(tmp_path / "analysis.json")
+    journal_path = create_experiment_journal(
+        capture_manifest=capture,
+        output_path=tmp_path / "baseline.json",
+        comparison_id="analysis-tamper",
+        variant_role="baseline",
+        hypothesis="Attached analysis files remain exact durable evidence.",
+    )
+    attach_capture_analysis_report(journal_path, analysis_report=report, label="levels")
+
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    payload["taps"][0]["analysis"]["measurements"]["audio.levels"]["rms_dbfs"] = -6.0
+    report.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(CaptureError, match="bound analysis report SHA-256 changed"):
+        verify_experiment_journal(journal_path)
+
+
+def test_attach_analysis_report_refuses_wrong_experiment_and_duplicate_label(tmp_path: Path) -> None:
+    capture = _write_capture_manifest(tmp_path / "capture.json")
+    wrong = _write_capture_analysis_report(tmp_path / "wrong.json", experiment_id="other")
+    good = _write_capture_analysis_report(tmp_path / "good.json")
+    second = _write_capture_analysis_report(tmp_path / "second.json")
+    journal_path = create_experiment_journal(
+        capture_manifest=capture,
+        output_path=tmp_path / "baseline.json",
+        comparison_id="analysis-labels",
+        variant_role="baseline",
+        hypothesis="Analysis bindings need exact experiment identity and unique labels.",
+    )
+
+    with pytest.raises(CaptureError, match="experiment_id does not match"):
+        attach_capture_analysis_report(journal_path, analysis_report=wrong, label="moderate")
+
+    attach_capture_analysis_report(journal_path, analysis_report=good, label="moderate")
+    with pytest.raises(CaptureError, match="label is already bound"):
+        attach_capture_analysis_report(journal_path, analysis_report=second, label="moderate")

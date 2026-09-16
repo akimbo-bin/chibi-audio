@@ -12,6 +12,8 @@ from .capture import CaptureError, _safe_id
 
 
 JOURNAL_SCHEMA_VERSION = 1
+CAPTURE_ANALYSIS_SCHEMA_VERSION = "chibi-audio-capture-analysis/v1"
+ANALYSIS_REPORT_SCHEMA_VERSION = "chibi-audio-analysis/v1"
 VARIANT_ROLES = frozenset({"baseline", "candidate"})
 DECISION_STATUSES = frozenset({"keep", "reject", "refine"})
 
@@ -72,6 +74,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _normalize_sha256(value: object, *, context: str) -> str:
+    if not isinstance(value, str):
+        raise CaptureError(f"{context} has no valid SHA-256")
+    normalized = value.lower()
+    if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+        raise CaptureError(f"{context} has no valid SHA-256")
+    return normalized
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -107,12 +118,7 @@ def _validate_capture_manifest(manifest: dict[str, Any]) -> None:
             raise CaptureError(f"capture manifest tap {tap_id} has no finalized artifact")
         if not str(final.get("path") or "").strip():
             raise CaptureError(f"capture manifest tap {tap_id} finalized artifact has no path")
-        digest = final.get("sha256")
-        if not isinstance(digest, str):
-            raise CaptureError(f"capture manifest tap {tap_id} finalized artifact has no valid SHA-256")
-        normalized = digest.lower()
-        if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
-            raise CaptureError(f"capture manifest tap {tap_id} finalized artifact has no valid SHA-256")
+        _normalize_sha256(final.get("sha256"), context=f"capture manifest tap {tap_id} finalized artifact")
 
 
 def _relative_reference(target: Path, base: Path) -> str:
@@ -120,6 +126,142 @@ def _relative_reference(target: Path, base: Path) -> str:
         return Path(os.path.relpath(target, base)).as_posix()
     except ValueError:
         return str(target)
+
+
+def _resolve_reference(reference: str, base: Path) -> Path:
+    path = Path(reference)
+    if not path.is_absolute():
+        path = base / path
+    return path.resolve()
+
+
+def _capture_final_hashes(manifest: dict[str, Any]) -> dict[int, str]:
+    _validate_capture_manifest(manifest)
+    return {
+        int(entry["tap_id"]): _normalize_sha256(
+            entry["final"]["sha256"],
+            context=f"capture manifest tap {entry["tap_id"]} finalized artifact",
+        )
+        for entry in manifest["taps"]
+    }
+
+
+def _validate_capture_analysis_report(report: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    if report.get("schema_version") != CAPTURE_ANALYSIS_SCHEMA_VERSION:
+        raise CaptureError(
+            f"analysis report must use {CAPTURE_ANALYSIS_SCHEMA_VERSION}"
+        )
+    expected_experiment = str(manifest.get("experiment_id") or "")
+    if str(report.get("experiment_id") or "") != expected_experiment:
+        raise CaptureError("analysis report experiment_id does not match bound capture manifest")
+
+    capabilities = report.get("requested_capabilities")
+    if (
+        not isinstance(capabilities, list)
+        or not capabilities
+        or any(not isinstance(value, str) or not value.strip() for value in capabilities)
+    ):
+        raise CaptureError("analysis report requested_capabilities must be a non-empty string list")
+
+    taps = report.get("taps")
+    if not isinstance(taps, list) or not taps:
+        raise CaptureError("analysis report must contain at least one analyzed tap")
+
+    expected_hashes = _capture_final_hashes(manifest)
+    seen: set[int] = set()
+    summaries: list[dict[str, Any]] = []
+    for entry in taps:
+        if not isinstance(entry, dict):
+            raise CaptureError("analysis report tap entry must be an object")
+        tap_id = entry.get("tap_id")
+        if isinstance(tap_id, bool) or not isinstance(tap_id, int):
+            raise CaptureError("analysis report tap_id must be an integer")
+        if tap_id in seen:
+            raise CaptureError(f"analysis report contains duplicate tap_id: {tap_id}")
+        seen.add(tap_id)
+        if tap_id not in expected_hashes:
+            raise CaptureError(f"analysis report tap {tap_id} is not present in bound capture manifest")
+
+        content_sha256 = _normalize_sha256(
+            entry.get("content_sha256"),
+            context=f"analysis report tap {tap_id} content",
+        )
+        if content_sha256 != expected_hashes[tap_id]:
+            raise CaptureError(f"analysis report tap {tap_id} content SHA-256 does not match bound capture artifact")
+
+        analysis = entry.get("analysis")
+        if not isinstance(analysis, dict) or analysis.get("schema_version") != ANALYSIS_REPORT_SCHEMA_VERSION:
+            raise CaptureError(
+                f"analysis report tap {tap_id} must contain {ANALYSIS_REPORT_SCHEMA_VERSION} evidence"
+            )
+        inner_sha256 = _normalize_sha256(
+            analysis.get("content_sha256"),
+            context=f"analysis report tap {tap_id} inner evidence content",
+        )
+        if inner_sha256 != content_sha256:
+            raise CaptureError(f"analysis report tap {tap_id} inner evidence content SHA-256 mismatch")
+
+        analysis_key = analysis.get("analysis_key")
+        if analysis_key is not None:
+            analysis_key = _normalize_sha256(
+                analysis_key,
+                context=f"analysis report tap {tap_id} analysis_key",
+            )
+
+        summaries.append(
+            {
+                "tap_id": tap_id,
+                "source_label": str(entry.get("source_label") or ""),
+                "content_sha256": content_sha256,
+                "analysis_key": analysis_key,
+            }
+        )
+
+    return {
+        "schema_version": CAPTURE_ANALYSIS_SCHEMA_VERSION,
+        "experiment_id": expected_experiment,
+        "requested_capabilities": list(capabilities),
+        "taps": summaries,
+    }
+
+
+def _verify_analysis_bindings(
+    journal_path: Path,
+    journal: dict[str, Any],
+    manifest: dict[str, Any],
+) -> None:
+    evidence = journal.get("evidence")
+    if evidence is None:
+        return
+    if not isinstance(evidence, dict):
+        raise CaptureError("experiment journal evidence must be an object")
+    reports = evidence.get("analysis_reports", [])
+    if not isinstance(reports, list):
+        raise CaptureError("experiment journal analysis_reports must be a list")
+
+    seen_labels: set[str] = set()
+    for binding in reports:
+        if not isinstance(binding, dict):
+            raise CaptureError("experiment journal analysis report binding must be an object")
+        label = str(binding.get("label") or "")
+        report_ref = str(binding.get("report_path") or "")
+        expected_hash = _normalize_sha256(
+            binding.get("report_sha256"),
+            context=f"analysis report binding {label or '<unlabeled>'}",
+        )
+        if not label or not report_ref:
+            raise CaptureError("experiment journal analysis report binding is incomplete")
+        if label in seen_labels:
+            raise CaptureError(f"experiment journal contains duplicate analysis label: {label}")
+        seen_labels.add(label)
+
+        report_path = _resolve_reference(report_ref, journal_path.parent)
+        if not report_path.is_file():
+            raise CaptureError(f"bound analysis report does not exist: {report_path}")
+        if _sha256(report_path) != expected_hash:
+            raise CaptureError(f"bound analysis report SHA-256 changed: {label}")
+        report = _load_json_object(report_path)
+        _validate_capture_analysis_report(report, manifest)
 
 
 def create_experiment_journal(
@@ -173,6 +315,7 @@ def create_experiment_journal(
         },
         "hypothesis": hypothesis_text,
         "changes": [item.as_dict() for item in change_items],
+        "evidence": {"analysis_reports": []},
         "decision": {
             "status": "pending",
             "history": [],
@@ -215,7 +358,59 @@ def verify_experiment_journal(path: str | Path) -> dict[str, Any]:
     _validate_capture_manifest(manifest)
     if str(manifest.get("experiment_id")) != expected_experiment:
         raise CaptureError("bound capture manifest experiment_id changed")
+    _verify_analysis_bindings(journal_path, journal, manifest)
     return journal
+
+
+def attach_capture_analysis_report(
+    path: str | Path,
+    *,
+    analysis_report: str | Path,
+    label: str,
+    attached_at_utc: str | None = None,
+) -> Path:
+    """Bind one persisted capture-analysis result to the journal by exact file/audio identity."""
+    journal_path = Path(path)
+    journal = verify_experiment_journal(journal_path)
+    capture = journal["capture"]
+    manifest_path = _resolve_reference(str(capture["manifest_path"]), journal_path.parent)
+    manifest = _load_json_object(manifest_path)
+
+    report_path = Path(analysis_report)
+    if report_path.resolve() in {journal_path.resolve(), manifest_path.resolve()}:
+        raise CaptureError("analysis report must be separate from the journal and capture manifest")
+    report = _load_json_object(report_path)
+    summary = _validate_capture_analysis_report(report, manifest)
+
+    safe_label = _safe_id(label)
+    evidence = journal.get("evidence")
+    if evidence is None:
+        evidence = {"analysis_reports": []}
+        journal["evidence"] = evidence
+    if not isinstance(evidence, dict):
+        raise CaptureError("experiment journal evidence must be an object")
+    reports = evidence.get("analysis_reports")
+    if reports is None:
+        reports = []
+        evidence["analysis_reports"] = reports
+    if not isinstance(reports, list):
+        raise CaptureError("experiment journal analysis_reports must be a list")
+    if any(isinstance(item, dict) and item.get("label") == safe_label for item in reports):
+        raise CaptureError(f"analysis report label is already bound: {safe_label}")
+
+    reports.append(
+        {
+            "label": safe_label,
+            "report_path": _relative_reference(report_path.resolve(), journal_path.parent.resolve()),
+            "report_sha256": _sha256(report_path),
+            "schema_version": summary["schema_version"],
+            "experiment_id": summary["experiment_id"],
+            "requested_capabilities": summary["requested_capabilities"],
+            "taps": summary["taps"],
+            "attached_at_utc": attached_at_utc or _utc_now(),
+        }
+    )
+    return _atomic_write_json(journal_path, journal)
 
 
 def append_experiment_decision(
