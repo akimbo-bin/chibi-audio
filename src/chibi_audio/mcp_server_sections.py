@@ -7,6 +7,8 @@ from pydantic import Field
 
 from .analysis_bridge import AnalysisFabricBridge
 from .analysis_mcp import AnalysisCapabilityList, AnalysisCostName, register_analysis_tools
+from .artifact_mcp import register_artifact_write_tools
+from .artifact_workflows import ArtifactWorkflowBridge
 from .capture import _safe_id
 from .capture_session import parse_session_tap
 from .managed_capture import run_managed_capture_session
@@ -42,10 +44,12 @@ def build_mcp_server(
     facade: ChibiAudioFacade | None = None,
     locator_client: LocatorBridgeClient | None = None,
     analysis_bridge: AnalysisFabricBridge | None = None,
+    artifact_workflows: ArtifactWorkflowBridge | None = None,
 ):
     server = build_base_mcp_server(settings, facade=facade)
     locator = locator_client or LocatorBridgeClient(host="127.0.0.1", port=settings.live_port)
     analysis = analysis_bridge or AnalysisFabricBridge(settings.artifact_root)
+    artifacts = artifact_workflows or ArtifactWorkflowBridge(settings.artifact_root)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -57,6 +61,12 @@ def build_mcp_server(
     write_annotations = ToolAnnotations(
         readOnlyHint=False,
         destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+    artifact_write_annotations = ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
         idempotentHint=False,
         openWorldHint=False,
     )
@@ -196,6 +206,7 @@ def build_mcp_server(
             raise _safe_tool_error(exc) from None
 
     if settings.allow_writes:
+        register_artifact_write_tools(server, artifacts, artifact_write_annotations)
 
         @server.tool(
             title="Capture one named song section",
