@@ -20,7 +20,7 @@ READ_ONLY_METHODS = frozenset(
     }
 )
 CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh", "chibitap_remove"})
-BOUNDED_WRITE_METHODS = frozenset({"parameter_set"})
+BOUNDED_WRITE_METHODS = frozenset({"parameter_set", "track_mixer_parameter_set", "track_set", "device_parameter_set", "device_enabled_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
 @dataclass(slots=True)
@@ -365,28 +365,217 @@ class LiveCaptureClient(_LiveTransport):
 
 @dataclass(slots=True)
 class LivePilotWriteClient(_LiveTransport):
-    """Narrow pilot mutations only; currently exact track-volume writes."""
-    def set_track_volume(
+    """Narrow, identity-guarded Live mutations. No generic object setter is exposed."""
+
+    def _track_identity(
         self,
         *,
         track_index: int,
         expected_track_name: str,
-        expected_current_value: float,
-        value: float,
-        verify_capability: bool = True,
+        expected_track_id: int | None = None,
+        expected_set_signature: str | None = None,
     ) -> dict[str, Any]:
         if track_index < 0:
             raise LiveBridgeError("track_index must be >= 0")
         if not expected_track_name:
             raise LiveBridgeError("expected_track_name is required")
+        params: dict[str, Any] = {
+            "track_index": int(track_index),
+            "expected_track_name": expected_track_name,
+        }
+        if expected_track_id is not None:
+            params["expected_track_id"] = int(expected_track_id)
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return params
+
+    def set_track_mixer_parameter(
+        self,
+        parameter: str,
+        *,
+        track_index: int,
+        expected_track_name: str,
+        expected_current_value: float,
+        value: float,
+        expected_track_id: int | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if parameter not in {"volume", "panning"}:
+            raise LiveBridgeError("track mixer parameter must be volume or panning")
         if verify_capability:
-            self._require_method("bounded_write", "parameter_set")
-        return self._request(
-            "parameter_set",
+            self._require_method("bounded_write", "track_mixer_parameter_set")
+        params = self._track_identity(
+            track_index=track_index,
+            expected_track_name=expected_track_name,
+            expected_track_id=expected_track_id,
+            expected_set_signature=expected_set_signature,
+        )
+        params.update(
             {
-                "ref": {"path": f"song tracks {track_index} mixer_device volume"},
-                "expected_track_name": expected_track_name,
+                "parameter": parameter,
                 "expected_current_value": float(expected_current_value),
                 "value": float(value),
-            },
+            }
         )
+        return self._request("track_mixer_parameter_set", params)
+
+    def set_track_volume(self, **kwargs) -> dict[str, Any]:
+        return self.set_track_mixer_parameter("volume", **kwargs)
+
+    def set_track_pan(self, **kwargs) -> dict[str, Any]:
+        return self.set_track_mixer_parameter("panning", **kwargs)
+
+    def set_track_property(
+        self,
+        *,
+        track_index: int,
+        expected_track_name: str,
+        property: str,
+        expected_current_value: Any,
+        value: Any,
+        expected_track_id: int | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if property not in {"mute", "solo", "name", "color_index"}:
+            raise LiveBridgeError("track property must be mute, solo, name, or color_index")
+        if verify_capability:
+            self._require_method("bounded_write", "track_set")
+        params = self._track_identity(
+            track_index=track_index,
+            expected_track_name=expected_track_name,
+            expected_track_id=expected_track_id,
+            expected_set_signature=expected_set_signature,
+        )
+        params.update(
+            {
+                "property": property,
+                "expected_current_value": expected_current_value,
+                "value": value,
+            }
+        )
+        return self._request("track_set", params)
+
+    def _device_target_identity(
+        self,
+        *,
+        placement: str,
+        track_index: int | None,
+        expected_track_name: str,
+        expected_track_id: int | None = None,
+        expected_set_signature: str | None = None,
+    ) -> dict[str, Any]:
+        if placement not in {"track", "master"}:
+            raise LiveBridgeError("placement must be track or master")
+        if not expected_track_name:
+            raise LiveBridgeError("expected_track_name is required")
+        params: dict[str, Any] = {
+            "placement": placement,
+            "expected_track_name": expected_track_name,
+        }
+        if placement == "track":
+            if track_index is None or track_index < 0:
+                raise LiveBridgeError("track placement requires track_index >= 0")
+            params["track_index"] = int(track_index)
+        elif track_index is not None:
+            raise LiveBridgeError("track_index must be omitted for placement=master")
+        if expected_track_id is not None:
+            params["expected_track_id"] = int(expected_track_id)
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return params
+
+    def set_device_parameter(
+        self,
+        *,
+        expected_track_name: str,
+        track_index: int | None = None,
+        placement: str = "track",
+        device_index: int,
+        expected_device_name: str,
+        parameter_index: int,
+        expected_parameter_name: str,
+        expected_current_value: float,
+        value: float,
+        expected_track_id: int | None = None,
+        expected_device_id: int | None = None,
+        expected_parameter_id: int | None = None,
+        expected_set_signature: str | None = None,
+        coerce: bool = False,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if device_index < 0 or parameter_index < 0:
+            raise LiveBridgeError("device_index and parameter_index must be >= 0")
+        if not expected_device_name or not expected_parameter_name:
+            raise LiveBridgeError("expected device and parameter names are required")
+        if verify_capability:
+            self._require_method("bounded_write", "device_parameter_set")
+        params = self._device_target_identity(
+            placement=placement,
+            track_index=track_index,
+            expected_track_name=expected_track_name,
+            expected_track_id=expected_track_id,
+            expected_set_signature=expected_set_signature,
+        )
+        params.update(
+            {
+                "device_index": int(device_index),
+                "expected_device_name": expected_device_name,
+                "parameter_index": int(parameter_index),
+                "expected_parameter_name": expected_parameter_name,
+                "expected_current_value": float(expected_current_value),
+                "value": float(value),
+                "coerce": bool(coerce),
+            }
+        )
+        if expected_device_id is not None:
+            params["expected_device_id"] = int(expected_device_id)
+        if expected_parameter_id is not None:
+            params["expected_parameter_id"] = int(expected_parameter_id)
+        return self._request("device_parameter_set", params)
+
+    def set_device_enabled(
+        self,
+        enabled: bool,
+        *,
+        expected_track_name: str,
+        track_index: int | None = None,
+        placement: str = "track",
+        device_index: int,
+        expected_device_name: str,
+        parameter_index: int,
+        expected_parameter_name: str,
+        expected_current_value: float,
+        expected_track_id: int | None = None,
+        expected_device_id: int | None = None,
+        expected_parameter_id: int | None = None,
+        expected_set_signature: str | None = None,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if type(enabled) is not bool:
+            raise LiveBridgeError("enabled must be a boolean")
+        if verify_capability:
+            self._require_method("bounded_write", "device_enabled_set")
+        params = self._device_target_identity(
+            placement=placement,
+            track_index=track_index,
+            expected_track_name=expected_track_name,
+            expected_track_id=expected_track_id,
+            expected_set_signature=expected_set_signature,
+        )
+        params.update(
+            {
+                "device_index": int(device_index),
+                "expected_device_name": expected_device_name,
+                "parameter_index": int(parameter_index),
+                "expected_parameter_name": expected_parameter_name,
+                "expected_current_value": float(expected_current_value),
+                "enabled": enabled,
+            }
+        )
+        if expected_device_id is not None:
+            params["expected_device_id"] = int(expected_device_id)
+        if expected_parameter_id is not None:
+            params["expected_parameter_id"] = int(expected_parameter_id)
+        return self._request("device_enabled_set", params)

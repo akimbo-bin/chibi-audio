@@ -7,6 +7,7 @@ from pathlib import Path
 from .als import dumps_report, inspect_set
 from .ab_compare import create_level_matched_ab
 from .audio import analyze_audio
+from .harshness import analyze_harshness
 from .capture import CaptureError
 from .capture_finalize import TapCaptureInput, finalize_aligned_captures
 from .capture_session import CaptureSessionTap, parse_session_tap, run_capture_session
@@ -60,6 +61,9 @@ def main() -> None:
     audio.add_argument("path")
     audio.add_argument("--window-seconds", type=float, default=12.0)
 
+    harshness = sub.add_parser("analyze-harshness", help="Rank time-localized bright/attack-heavy events")
+    harshness.add_argument("path")
+    harshness.add_argument("--top-events", type=int, default=12)
     level_match = sub.add_parser("level-match-ab", help="Create downward-only integrated-loudness-matched A/B listening artifacts")
     level_match.add_argument("left")
     level_match.add_argument("right")
@@ -126,6 +130,8 @@ def main() -> None:
         print(json.dumps(client.set_summary(track_limit=args.track_limit, device_limit=args.device_limit), indent=2, ensure_ascii=False))
     elif args.command == "analyze-audio":
         print(json.dumps(analyze_audio(args.path, window_seconds=args.window_seconds), indent=2, ensure_ascii=False))
+    elif args.command == "analyze-harshness":
+        print(json.dumps(analyze_harshness(args.path, top_events=args.top_events), indent=2, ensure_ascii=False))
     elif args.command == "level-match-ab":
         manifest_path = create_level_matched_ab(
             left=args.left,

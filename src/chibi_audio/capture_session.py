@@ -436,7 +436,6 @@ def run_capture_session(
         raise CaptureError("settle_seconds must be >= 0 and timeout_margin must be > 0")
 
     read_client = LiveBridgeClient(host=host, port=port, timeout=30.0)
-    capture_client = LiveCaptureClient(host=host, port=port, timeout=30.0)
     summary = read_client.set_summary(
         track_limit=240,
         device_limit=96,
@@ -454,6 +453,11 @@ def run_capture_session(
     tempo = float(summary.get("tempo") or 0.0)
     target_samples = samples_for_beat_range(start_beat, end_beat, tempo, 48000)
     expected_seconds = target_samples / 48000.0
+    # play_until can remain in-flight for the entire requested range. Budget the
+    # transport RPC from that duration instead of using a fixed 30 s timeout,
+    # which is too tight for ordinary ~30 s musical sections under modest load.
+    capture_rpc_timeout = max(30.0, expected_seconds + timeout_margin + 5.0)
+    capture_client = LiveCaptureClient(host=host, port=port, timeout=capture_rpc_timeout)
 
     song = read_client.call(
         "get",
@@ -489,13 +493,16 @@ def run_capture_session(
 
         if settle_seconds:
             time.sleep(settle_seconds)
+        # The request may reach Live even if its response is lost or times out.
+        # Mark the effect as potentially started before the call so the finally
+        # path always reconciles transport with an explicit guarded stop.
+        play_started = True
         play = capture_client.transport(
             "play_until",
             time=float(start_beat),
             end_time=float(end_beat),
             expected_set_signature=set_signature,
         )
-        play_started = True
         transport_start = float(play.get("scheduled_start_time", start_beat))
 
         _wait_for_capture_quiescence(
