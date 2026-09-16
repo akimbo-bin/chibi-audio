@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import shutil
 import struct
+import sys
 import wave
 
 import pytest
@@ -161,3 +162,47 @@ def test_create_level_matched_ab_cleans_outputs_if_manifest_write_fails(monkeypa
 
     assert output_dir.is_dir()
     assert list(output_dir.iterdir()) == []
+
+
+def test_level_match_ab_cli_routes_to_artifact_creator(monkeypatch, tmp_path: Path, capsys) -> None:
+    import chibi_audio.cli as cli
+
+    manifest = tmp_path / "result.json"
+    manifest.write_text("{\"ok\": true}\n", encoding="utf-8")
+    calls = {}
+
+    def fake_create_level_matched_ab(**kwargs):
+        calls.update(kwargs)
+        return manifest
+
+    monkeypatch.setattr(cli, "create_level_matched_ab", fake_create_level_matched_ab)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "chibi-audio",
+            "level-match-ab",
+            "left.wav",
+            "right.wav",
+            "--output-dir",
+            str(tmp_path / "ab"),
+            "--comparison-id",
+            "drop-proof",
+            "--left-label",
+            "candidate",
+            "--right-label",
+            "baseline",
+        ],
+    )
+
+    cli.main()
+
+    assert calls == {
+        "left": "left.wav",
+        "right": "right.wav",
+        "output_dir": str(tmp_path / "ab"),
+        "comparison_id": "drop-proof",
+        "left_label": "candidate",
+        "right_label": "baseline",
+    }
+    assert capsys.readouterr().out == "{\"ok\": true}\n"
