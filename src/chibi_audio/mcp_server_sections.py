@@ -6,7 +6,17 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from .analysis_bridge import AnalysisFabricBridge
-from .analysis_mcp import AnalysisCapabilityList, AnalysisCostName, register_analysis_tools
+from .analysis_mcp import (
+    AnalysisCapabilityList,
+    AnalysisCostName,
+    AnalysisDbfsThreshold,
+    AnalysisFraction,
+    AnalysisLabel,
+    AnalysisLowBandHz,
+    AnalysisPositiveMs,
+    AnalysisSourceLabelList,
+    register_analysis_tools,
+)
 from .artifact_mcp import register_artifact_write_tools
 from .artifact_workflows import ArtifactWorkflowBridge
 from .capture import _safe_id
@@ -266,6 +276,147 @@ def build_mcp_server(
                     "section": plan["section"],
                     "capture_request": plan["capture_request"],
                     "manifest_artifact": relative_manifest.as_posix(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                raise _safe_tool_error(exc) from None
+
+        @server.tool(
+            title="Capture a named section and attribute master stress",
+            description=(
+                "Resolve one artist-authored Locator section, validate an explicit aligned tap layout, execute one "
+                "managed ChibiTap capture with Set-signature fencing and exact topology restoration, then estimate "
+                "latency-corrected master-chain stress against the requested source/group taps. The capture is a "
+                "write-gated Live effect; the attribution is read-only evidence and does not prove causality."
+            ),
+            annotations=write_annotations,
+            structured_output=True,
+        )
+        def capture_section_master_stress(
+            name: ObjectName,
+            experiment_id: ExperimentId,
+            tap_specs: TapSpecList,
+            premaster_label: AnalysisLabel,
+            master_label: AnalysisLabel,
+            source_labels: AnalysisSourceLabelList,
+            occurrence: SectionOccurrence | None = None,
+            limit: LocatorLimit = 256,
+            window_ms: AnalysisPositiveMs = 100.0,
+            hop_ms: AnalysisPositiveMs = 10.0,
+            max_latency_ms: AnalysisPositiveMs = 500.0,
+            low_band_hz: AnalysisLowBandHz = 250.0,
+            active_threshold_dbfs: AnalysisDbfsThreshold = -45.0,
+            top_stress_fraction: AnalysisFraction = 0.10,
+        ) -> dict[str, Any]:
+            try:
+                if not tap_specs:
+                    raise ValueError("capture_section_master_stress requires at least one tap spec")
+
+                # Validate the complete logical tap contract before any Live mutation.
+                parsed_taps = [parse_session_tap(value) for value in tap_specs]
+                safe_premaster = _safe_id(premaster_label)
+                safe_master = _safe_id(master_label)
+                safe_sources = [_safe_id(value) for value in source_labels]
+                requested_labels = [safe_premaster, safe_master, *safe_sources]
+                if len(set(requested_labels)) != len(requested_labels):
+                    raise ValueError("premaster, master and source labels must be distinct")
+
+                taps_by_label: dict[str, list[Any]] = {}
+                for tap in parsed_taps:
+                    taps_by_label.setdefault(tap.source_label, []).append(tap)
+                selected: dict[str, Any] = {}
+                for label in requested_labels:
+                    matches = taps_by_label.get(label, [])
+                    if len(matches) != 1:
+                        raise ValueError(
+                            f"capture_section_master_stress requires exactly one tap spec for label {label!r}"
+                        )
+                    selected[label] = matches[0]
+
+                premaster_tap = selected[safe_premaster]
+                if premaster_tap.target.strip().lower() != "master" or premaster_tap.signal_point != "pre_fx":
+                    raise ValueError(
+                        "premaster_label must select a master target captured at pre_fx"
+                    )
+                master_tap = selected[safe_master]
+                if master_tap.target.strip().lower() != "master" or master_tap.signal_point != "post_fx":
+                    raise ValueError(
+                        "master_label must select a master target captured at post_fx"
+                    )
+                if any(selected[label].target.strip().lower() == "master" for label in safe_sources):
+                    raise ValueError("source_labels must select non-master track/group taps")
+
+                section_map = fresh_sections(limit)
+                plan = build_section_capture_plan(
+                    section_map,
+                    name,
+                    occurrence=occurrence,
+                    tap_specs=tap_specs,
+                )
+                set_signature = str(plan.get("set_signature") or "")
+                if not set_signature:
+                    raise ValueError("locator read did not return a Set signature")
+
+                safe_experiment = _safe_id(experiment_id)
+                output_dir = settings.artifact_root / "section-captures" / safe_experiment
+                capture_result = run_managed_capture_session(
+                    experiment_id=safe_experiment,
+                    taps=parsed_taps,
+                    output_dir=output_dir,
+                    start_beat=float(plan["capture_request"]["start_beat"]),
+                    end_beat=float(plan["capture_request"]["end_beat"]),
+                    host="127.0.0.1",
+                    port=settings.live_port,
+                    include_analysis=False,
+                    expected_set_signature=set_signature,
+                    remove_created_after=True,
+                )
+
+                manifest = capture_result.manifest_path.resolve()
+                root = settings.artifact_root.resolve()
+                manifest_artifact = manifest.relative_to(root).as_posix()
+                analysis_state = "COMPLETED"
+                analysis_result: dict[str, Any] | None = None
+                analysis_error: str | None = None
+                try:
+                    analysis_result = analysis.attribute_capture_master_stress(
+                        manifest_artifact,
+                        premaster_label=safe_premaster,
+                        master_label=safe_master,
+                        source_labels=safe_sources,
+                        window_ms=window_ms,
+                        hop_ms=hop_ms,
+                        max_latency_ms=max_latency_ms,
+                        low_band_hz=low_band_hz,
+                        active_threshold_dbfs=active_threshold_dbfs,
+                        top_stress_fraction=top_stress_fraction,
+                    )
+                except Exception as exc:  # noqa: BLE001 - capture effect is already confirmed.
+                    analysis_state = "FAILED"
+                    analysis_error = _safe_post_capture_analysis_error(exc)
+
+                return {
+                    "effect_state": "STARTED_CONFIRMED",
+                    "analysis_state": analysis_state,
+                    "analysis_error": analysis_error,
+                    "set_signature": set_signature,
+                    "prepared_set_signature": capture_result.topology.final_set_signature,
+                    "topology": capture_result.topology.as_dict(),
+                    "restore": capture_result.restore,
+                    "section": plan["section"],
+                    "capture_request": plan["capture_request"],
+                    "manifest_artifact": manifest_artifact,
+                    "attribution_request": {
+                        "premaster_label": safe_premaster,
+                        "master_label": safe_master,
+                        "source_labels": safe_sources,
+                        "window_ms": window_ms,
+                        "hop_ms": hop_ms,
+                        "max_latency_ms": max_latency_ms,
+                        "low_band_hz": low_band_hz,
+                        "active_threshold_dbfs": active_threshold_dbfs,
+                        "top_stress_fraction": top_stress_fraction,
+                    },
+                    "analysis": analysis_result,
                 }
             except Exception as exc:  # noqa: BLE001
                 raise _safe_tool_error(exc) from None

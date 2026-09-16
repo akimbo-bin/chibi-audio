@@ -26,6 +26,11 @@ from .sample_similarity import (
     SampleSimilarityError,
     rank_sample_similarity,
 )
+from .stress import (
+    MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION,
+    MasterStressAttributionError,
+    attribute_capture_master_stress,
+)
 from .service import AnalysisUnavailable, AnalyzerRegistry, AudioAnalysisService
 
 __all__ = [
@@ -33,6 +38,7 @@ __all__ = [
     "BASIC_CAPABILITIES",
     "COMPARISON_SCHEMA_VERSION",
     "SAMPLE_SIMILARITY_SCHEMA_VERSION",
+    "MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SPECTRAL_OVERLAP_SCHEMA_VERSION",
     "SPECTRAL_OVERLAP_TIMELINE_SCHEMA_VERSION",
@@ -48,8 +54,10 @@ __all__ = [
     "CaptureManifestAnalysisError",
     "CaptureSpectralOverlapError",
     "SampleSimilarityError",
+    "MasterStressAttributionError",
     "align_capture_events",
     "analyze_capture_manifest",
+    "attribute_capture_master_stress",
     "compare_capture_spectral_overlap",
     "compare_capture_spectral_overlap_timeline",
     "compare_reports",

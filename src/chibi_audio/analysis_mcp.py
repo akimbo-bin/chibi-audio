@@ -15,6 +15,11 @@ AnalysisTapId = Annotated[int, Field(ge=1, le=9999, strict=True)]
 AnalysisTapIdList = Annotated[list[AnalysisTapId], Field(max_length=32)]
 AnalysisSeconds = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
 AnalysisLabel = Annotated[str, Field(min_length=1, max_length=200)]
+AnalysisSourceLabelList = Annotated[list[AnalysisLabel], Field(min_length=1, max_length=16)]
+AnalysisPositiveMs = Annotated[float, Field(gt=0.0, le=5000.0, allow_inf_nan=False)]
+AnalysisLowBandHz = Annotated[float, Field(ge=20.0, le=20000.0, allow_inf_nan=False)]
+AnalysisDbfsThreshold = Annotated[float, Field(ge=-160.0, le=0.0, allow_inf_nan=False)]
+AnalysisFraction = Annotated[float, Field(ge=0.01, le=0.5, allow_inf_nan=False)]
 AnalysisArtifact = Annotated[str, Field(min_length=1, max_length=2000)]
 AnalysisReportPayload = dict[str, Any]
 
@@ -100,6 +105,45 @@ def register_analysis_tools(
             raise _safe_analysis_error(exc) from None
 
     @server.tool(
+        title="Attribute master-chain stress to captured sources",
+        description=(
+            "Use one finalized aligned capture manifest containing premaster, master and source/group taps "
+            "to estimate master-chain latency, relative RMS gain suppression, and which captured sources "
+            "co-vary with high-stress windows. This is read-only attribution evidence, not proof of causality "
+            "and never authorizes an Ableton mutation."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def attribute_master_stress(
+        manifest: AnalysisArtifact,
+        premaster_label: AnalysisLabel,
+        master_label: AnalysisLabel,
+        source_labels: AnalysisSourceLabelList,
+        window_ms: AnalysisPositiveMs = 100.0,
+        hop_ms: AnalysisPositiveMs = 10.0,
+        max_latency_ms: AnalysisPositiveMs = 500.0,
+        low_band_hz: AnalysisLowBandHz = 250.0,
+        active_threshold_dbfs: AnalysisDbfsThreshold = -45.0,
+        top_stress_fraction: AnalysisFraction = 0.10,
+    ) -> dict[str, Any]:
+        try:
+            return analysis.attribute_capture_master_stress(
+                manifest,
+                premaster_label=premaster_label,
+                master_label=master_label,
+                source_labels=source_labels,
+                window_ms=window_ms,
+                hop_ms=hop_ms,
+                max_latency_ms=max_latency_ms,
+                low_band_hz=low_band_hz,
+                active_threshold_dbfs=active_threshold_dbfs,
+                top_stress_fraction=top_stress_fraction,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _safe_analysis_error(exc) from None
+
+    @server.tool(
         title="Compare two completed analysis reports",
         description=(
             "Compare already-computed reusable analysis reports without reopening audio. Numeric deltas are "
@@ -128,5 +172,6 @@ def register_analysis_tools(
         "list_audio_analyzers",
         "analyze_audio",
         "analyze_capture_manifest",
+        "attribute_master_stress",
         "compare_analysis_reports",
     )

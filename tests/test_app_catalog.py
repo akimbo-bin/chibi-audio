@@ -15,6 +15,7 @@ READ_ONLY_TOOLS = {
     "analyze_audio",
     "analyze_capture_manifest",
     "analyze_harshness_artifact",
+    "attribute_master_stress",
     "compare_analysis_reports",
     "device_parameters",
     "diff_parameter_snapshots",
@@ -35,6 +36,7 @@ READ_ONLY_TOOLS = {
 WRITE_ADDITIONS = {
     "capture_section",
     "capture_section_evidence",
+    "capture_section_master_stress",
     "create_level_matched_ab",
     "rename_track",
     "set_device_enabled",
