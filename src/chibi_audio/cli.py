@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .als import dumps_report, inspect_set
+from .ab_compare import create_level_matched_ab
 from .audio import analyze_audio
 from .capture import CaptureError
 from .capture_finalize import TapCaptureInput, finalize_aligned_captures
@@ -58,6 +59,14 @@ def main() -> None:
     audio = sub.add_parser("analyze-audio", help="Measure a local audio file without modifying it")
     audio.add_argument("path")
     audio.add_argument("--window-seconds", type=float, default=12.0)
+
+    level_match = sub.add_parser("level-match-ab", help="Create downward-only integrated-loudness-matched A/B listening artifacts")
+    level_match.add_argument("left")
+    level_match.add_argument("right")
+    level_match.add_argument("--output-dir", required=True)
+    level_match.add_argument("--comparison-id", required=True)
+    level_match.add_argument("--left-label", default="A")
+    level_match.add_argument("--right-label", default="B")
 
     finalize = sub.add_parser(
         "finalize-capture",
@@ -117,6 +126,16 @@ def main() -> None:
         print(json.dumps(client.set_summary(track_limit=args.track_limit, device_limit=args.device_limit), indent=2, ensure_ascii=False))
     elif args.command == "analyze-audio":
         print(json.dumps(analyze_audio(args.path, window_seconds=args.window_seconds), indent=2, ensure_ascii=False))
+    elif args.command == "level-match-ab":
+        manifest_path = create_level_matched_ab(
+            left=args.left,
+            right=args.right,
+            output_dir=args.output_dir,
+            comparison_id=args.comparison_id,
+            left_label=args.left_label,
+            right_label=args.right_label,
+        )
+        print(manifest_path.read_text(encoding="utf-8"), end="")
     elif args.command == "finalize-capture":
         manifest_path = finalize_aligned_captures(
             experiment_id=args.experiment_id,
