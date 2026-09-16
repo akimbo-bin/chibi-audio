@@ -50,6 +50,23 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "sidechain_audit": {
+        "description": (
+            "Read the exact native Compressor sidechain graph for the current Live Set. "
+            "Third-party plugin routes remain explicitly unsupported rather than inferred."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "track_limit": {"type": "integer", "minimum": -1, "maximum": 1000},
+                "max_devices": {"type": "integer", "minimum": 1, "maximum": 20000},
+                "max_depth": {"type": "integer", "minimum": 0, "maximum": 32},
+                "include_return_tracks": {"type": "boolean"},
+                "include_master_track": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    },
     "device_parameters": {
         "description": "Read exposed parameters for one freshly resolved Live device object id.",
         "inputSchema": {
@@ -282,6 +299,16 @@ class ChibiAudioFacade:
             "project_snapshot": lambda a: self.read.set_summary(
                 track_limit=int(a.get("track_limit", 140)),
                 device_limit=int(a.get("device_limit", 24)),
+            ),
+            "sidechain_audit": lambda a: self.read.call(
+                "sidechain_graph",
+                {
+                    "track_limit": int(a.get("track_limit", 256)),
+                    "max_devices": int(a.get("max_devices", 4096)),
+                    "max_depth": int(a.get("max_depth", 8)),
+                    "include_return_tracks": bool(a.get("include_return_tracks", True)),
+                    "include_master_track": bool(a.get("include_master_track", True)),
+                },
             ),
             "device_parameters": lambda a: self.read.call(
                 "device_parameters",

@@ -17,6 +17,7 @@ READ_ONLY_METHODS = frozenset(
         "browser_capabilities",
         "browser_roots",
         "browser_search",
+        "sidechain_graph",
     }
 )
 CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh", "chibitap_remove"})
@@ -96,6 +97,26 @@ class LiveBridgeClient(_LiveTransport):
         return self._request(method, params)
     def status(self) -> dict[str, Any]:
         return self.call("bridge_status")
+    def sidechain_graph(
+        self,
+        *,
+        track_limit: int = 256,
+        max_devices: int = 4096,
+        max_depth: int = 8,
+        include_return_tracks: bool = True,
+        include_master_track: bool = True,
+    ) -> dict[str, Any]:
+        return self.call(
+            "sidechain_graph",
+            {
+                "track_limit": int(track_limit),
+                "max_devices": int(max_devices),
+                "max_depth": int(max_depth),
+                "include_return_tracks": bool(include_return_tracks),
+                "include_master_track": bool(include_master_track),
+            },
+        )
+
     def set_summary(
         self,
         *,

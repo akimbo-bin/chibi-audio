@@ -24,6 +24,12 @@ class FakeRead:
 
     def call(self, method, params=None):
         self.calls.append((method, params or {}))
+        if method == "sidechain_graph":
+            return {
+                "effect_state": "NOT_STARTED",
+                "consumer_count": 1,
+                "consumers": [{"target": {"name": "BASS"}, "source": {"routing_type": "SIDECHAIN"}}],
+            }
         if method == "device_parameters":
             return {
                 "parameters": [
@@ -169,3 +175,30 @@ def test_master_parameter_snapshot_routes_without_track_index():
     schema = TOOL_SCHEMAS["set_device_parameter"]["inputSchema"]
     assert "track_index" not in schema["required"]
     assert schema["properties"]["placement"]["enum"] == ["track", "master"]
+
+
+def test_sidechain_audit_is_explicit_read_only_facade_call():
+    facade = make_facade()
+    assert "sidechain_audit" in facade.tool_names()
+    result = facade.call(
+        "sidechain_audit",
+        {
+            "track_limit": 87,
+            "max_devices": 2048,
+            "max_depth": 7,
+            "include_return_tracks": False,
+            "include_master_track": True,
+        },
+    )
+    assert result["effect_state"] == "NOT_STARTED"
+    assert result["consumers"][0]["target"]["name"] == "BASS"
+    assert facade.read.calls[-1] == (
+        "sidechain_graph",
+        {
+            "track_limit": 87,
+            "max_devices": 2048,
+            "max_depth": 7,
+            "include_return_tracks": False,
+            "include_master_track": True,
+        },
+    )
