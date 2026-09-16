@@ -58,6 +58,21 @@ These are provenance claims, not proof that a Live mutation succeeded. Higher-le
 
 Declared before/after values must be strict JSON values; non-finite numeric values such as `NaN` or infinity are refused rather than emitting implementation-specific JSON.
 
+## Analysis evidence binding
+
+`attach_capture_analysis_report(...)` binds a persisted `chibi-audio-capture-analysis/v1` result to the journal without running DSP. The report must match the already-bound capture by:
+
+- capture `experiment_id`;
+- Tap ID;
+- each finalized tap's exact audio `content_sha256`;
+- the inner `chibi-audio-analysis/v1` report's matching content hash.
+
+The journal records a stable label, relative report path where possible, SHA-256 of the exact report file, requested capabilities, and per-tap content/analysis identities. An unrelated capture, wrong Tap ID/hash, wrong schema, or duplicate label is refused.
+
+`verify_experiment_journal(...)` re-hashes every attached analysis report and revalidates it against the bound capture manifest. Editing a report after attachment therefore invalidates the journal instead of silently changing the evidence behind a later keep/reject/refine decision.
+
+This is provenance only: the journal does not execute analyzers or interpret the measurements as a musical verdict.
+
 ## Decision contract
 
 New journals begin with `decision.status = pending` and an empty history.
@@ -76,7 +91,7 @@ A decision note is optional but, when supplied, must be non-empty.
 
 The journal intentionally contains no `better`, `worse`, quality score, LUFS target verdict, or autonomous winner selection.
 
-Analysis reports may later be referenced by a higher-level optimizer, but they remain evidence. The experiment journal exists to make the full loop reproducible:
+Attached analysis reports remain evidence rather than authority. The experiment journal exists to make the full loop reproducible:
 
 `baseline -> hypothesis -> bounded change -> capture -> analysis -> artist decision -> keep/rollback/refine`
 
@@ -84,4 +99,4 @@ Analysis reports may later be referenced by a higher-level optimizer, but they r
 
 This first slice is a pure library module and unit-test fixture. It does not modify `cli.py`, the MCP surface, `capture_session.py`, or `src/chibi_audio/analysis/**`, avoiding collision with the active #6 and #8 lanes.
 
-The next integration step is to have the optimizer/control layer create journals from verified before/after snapshots and finalized capture manifests, then attach analysis-report references without weakening the capture-manifest integrity binding.
+The next integration step is to have the optimizer/control layer create these journals automatically from read-back-verified before/after snapshots plus finalized `capture_section_evidence` results, while preserving this module as a pure provenance layer rather than a second execution authority.
