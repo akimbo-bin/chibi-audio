@@ -64,6 +64,17 @@ Next:
 - carry accepted/rejected change provenance into higher-level experiment manifests so optimization waves can compare variants without ad-hoc exports.
 
 **Acceptance: PROVEN on KISSKISSKISS.** A normal A/B capture requires no CUA or Export Audio/Video dialog, produces fingerprinted float32 artifacts linked to one experiment manifest, and multiple taps produce the same exact requested musical sample range with deterministic alignment.
+## R1.75 - Typed Ableton control and diagnostic audition plane - ACTIVE
+Tracked by [#6](https://github.com/akimbo-bin/chibi-audio/issues/6).
+
+Parallel to ChibiTap audio capture, remove routine CUA by expanding the narrow Live bridge into explicit effect-certain controls for track volume/pan, mute/solo, rename/recolor and exact exposed device parameters. Add parameter snapshots/diffs, reversible audition plans, and a transport-agnostic facade ready for a secure MCP endpoint without exposing raw Live JSON-RPC.
+
+In the same lane, add an immediately useful offline high-end diagnostic that ranks time-localized bright/attack-heavy events using inspectable spectral/transient evidence. It is a diagnostic proxy, not an autonomous quality score, and can operate on existing KISS renders without touching the live Set.
+
+No generic Live setter, arbitrary Python/eval, or silent GUI fallback is allowed.
+
+**Acceptance:** common bounded mix adjustments have a typed path; audition/restore and parameter diffs are deterministic; the high-end analyzer localizes synthetic and real events; and the capability surface is ready for an MCP transport. Live mutation proof is coordinated separately so this lane does not collide with an active Set owner.
+
 ## R2 - First reversible organization edit
 On the lab Set only:
 - checkpoint current state;

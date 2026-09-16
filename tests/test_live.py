@@ -1,5 +1,7 @@
-from pathlib import Path
+﻿from pathlib import Path
+
 import pytest
+
 from chibi_audio.live import (
     BOUNDED_WRITE_METHODS,
     CAPTURE_METHODS,
@@ -9,39 +11,54 @@ from chibi_audio.live import (
     LiveCaptureClient,
     LivePilotWriteClient,
 )
+
+
 def test_read_only_surface_excludes_mutation_and_capture():
-    assert "parameter_set" not in READ_ONLY_METHODS
+    assert "track_set" not in READ_ONLY_METHODS
     assert "agent_audio_tap" not in READ_ONLY_METHODS
-    assert "parameter_set" in BOUNDED_WRITE_METHODS
+    assert "track_mixer_parameter_set" in BOUNDED_WRITE_METHODS
+    assert "device_parameter_set" in BOUNDED_WRITE_METHODS
     assert "agent_audio_tap" in CAPTURE_METHODS
+
+
 def test_client_refuses_unknown_method_before_network():
     client = LiveBridgeClient(port=1)
     with pytest.raises(LiveBridgeError, match="read-only client"):
         client.call("set", {"property": "mute", "value": True})
+
+
 class FakeCaptureClient(LiveCaptureClient):
     def __init__(self):
         super().__init__()
         self.calls = []
+
     def status(self):
         return {
             "capabilities": {
                 "capture": list(CAPTURE_METHODS),
-                "bounded_write": ["parameter_set"],
+                "bounded_write": list(BOUNDED_WRITE_METHODS),
                 "read": list(READ_ONLY_METHODS),
             }
         }
+
     def _request(self, method, params=None):
         self.calls.append((method, params or {}))
         return {"ok": True, "method": method, "params": params or {}}
+
+
 class FakeWriteClient(LivePilotWriteClient):
     def __init__(self):
         super().__init__()
         self.calls = []
+
     def status(self):
-        return {"capabilities": {"bounded_write": ["parameter_set"]}}
+        return {"capabilities": {"bounded_write": list(BOUNDED_WRITE_METHODS)}}
+
     def _request(self, method, params=None):
         self.calls.append((method, params or {}))
         return {"ok": True, "method": method, "params": params or {}}
+
+
 def test_capture_open_is_explicit_and_path_bound():
     client = FakeCaptureClient()
     result = client.capture("open", path=Path("C:/tmp/test.wav"), command_id="exp-1")
@@ -50,27 +67,144 @@ def test_capture_open_is_explicit_and_path_bound():
     assert client.calls[-1][1]["path"].endswith("test.wav")
     assert client.calls[-1][1]["command_id"] == "exp-1"
     assert client.calls[-1][1]["udp"] is False
+
+
 def test_capture_open_requires_path():
     with pytest.raises(LiveBridgeError, match="requires an output path"):
         FakeCaptureClient().capture("open")
+
+
 def test_capture_rejects_unadvertised_capability():
     client = FakeCaptureClient()
     client.status = lambda: {"capabilities": {"capture": []}}
     with pytest.raises(LiveBridgeError, match="does not advertise"):
         client.capture("status")
-def test_pilot_write_targets_only_exact_track_volume_path():
+
+
+def test_typed_track_volume_and_pan_requests_include_guards():
     client = FakeWriteClient()
     result = client.set_track_volume(
         track_index=60,
         expected_track_name="61-something",
+        expected_track_id=6060,
         expected_current_value=0.85,
         value=0.82,
+        expected_set_signature="sig-volume",
     )
-    assert result["method"] == "parameter_set"
+    assert result["method"] == "track_mixer_parameter_set"
     params = client.calls[-1][1]
-    assert params["ref"]["path"] == "song tracks 60 mixer_device volume"
+    assert params["parameter"] == "volume"
     assert params["expected_track_name"] == "61-something"
+    assert params["expected_track_id"] == 6060
     assert params["expected_current_value"] == pytest.approx(0.85)
+    assert params["expected_set_signature"] == "sig-volume"
+
+    pan = client.set_track_pan(
+        track_index=4,
+        expected_track_name="Hats",
+        expected_current_value=0.0,
+        value=-0.1,
+    )
+    assert pan["method"] == "track_mixer_parameter_set"
+    assert client.calls[-1][1]["parameter"] == "panning"
+
+
+def test_typed_track_property_request_is_narrow():
+    client = FakeWriteClient()
+    result = client.set_track_property(
+        track_index=4,
+        expected_track_name="Hats",
+        property="solo",
+        expected_current_value=False,
+        value=True,
+    )
+    assert result["method"] == "track_set"
+    assert client.calls[-1][1]["property"] == "solo"
+    with pytest.raises(LiveBridgeError, match="mute, solo, name, or color_index"):
+        client.set_track_property(
+            track_index=4,
+            expected_track_name="Hats",
+            property="delete_device",
+            expected_current_value=False,
+            value=True,
+        )
+
+
+def test_typed_device_parameter_request_carries_exact_ids():
+    client = FakeWriteClient()
+    result = client.set_device_parameter(
+        track_index=4,
+        expected_track_name="Hats",
+        expected_track_id=444,
+        device_index=2,
+        expected_device_name="soothe2",
+        expected_device_id=222,
+        parameter_index=5,
+        expected_parameter_name="Depth",
+        expected_parameter_id=555,
+        expected_current_value=0.25,
+        value=0.30,
+        expected_set_signature="sig-param",
+    )
+    assert result["method"] == "device_parameter_set"
+    params = client.calls[-1][1]
+    assert params["expected_track_id"] == 444
+    assert params["expected_device_id"] == 222
+    assert params["expected_parameter_id"] == 555
+    assert params["expected_set_signature"] == "sig-param"
+
+
+def test_typed_master_device_parameter_request_omits_track_index():
+    client = FakeWriteClient()
+    result = client.set_device_parameter(
+        placement="master",
+        expected_track_name="Main",
+        expected_track_id=1700,
+        device_index=6,
+        expected_device_name="Pro-L 2",
+        expected_device_id=2600,
+        parameter_index=4,
+        expected_parameter_name="Gain",
+        expected_parameter_id=4600,
+        expected_current_value=0.41,
+        value=0.42,
+        expected_set_signature="sig-master",
+    )
+    assert result["method"] == "device_parameter_set"
+    params = client.calls[-1][1]
+    assert params["placement"] == "master"
+    assert "track_index" not in params
+    assert params["expected_track_name"] == "Main"
+    assert params["expected_track_id"] == 1700
+    assert params["expected_set_signature"] == "sig-master"
+
+    with pytest.raises(LiveBridgeError, match="track_index must be omitted"):
+        client.set_device_parameter(
+            placement="master",
+            track_index=0,
+            expected_track_name="Main",
+            device_index=6,
+            expected_device_name="Pro-L 2",
+            parameter_index=4,
+            expected_parameter_name="Gain",
+            expected_current_value=0.41,
+            value=0.42,
+        )
+
+
+def test_device_enabled_requires_boolean():
+    client = FakeWriteClient()
+    with pytest.raises(LiveBridgeError, match="enabled must be a boolean"):
+        client.set_device_enabled(
+            1,
+            track_index=4,
+            expected_track_name="Hats",
+            device_index=2,
+            expected_device_name="soothe2",
+            parameter_index=0,
+            expected_parameter_name="Device On",
+            expected_current_value=1.0,
+        )
 
 
 def test_capture_surface_includes_probe_setup_and_transport():
@@ -85,6 +219,7 @@ def test_capture_probe_setup_is_master_only():
     params = client.calls[-1][1]
     assert params["placement"] == "master"
     assert params["expected_set_signature"] == "sig-1"
+
 
 def test_chibitap_capture_is_explicit_and_guarded():
     assert "chibitap_capture" in CAPTURE_METHODS
