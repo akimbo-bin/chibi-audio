@@ -34,6 +34,7 @@ class Mixer:
 class Device:
     def __init__(self):
         self.name = "soothe2"
+        self.class_name = "PluginDevice"
         self.parameters = [
             Parameter("Device On", 1.0),
             Parameter("Depth", 0.25),
@@ -235,4 +236,106 @@ def test_master_device_write_refuses_track_index_and_stale_identity():
                 "expected_current_value": 0.25,
                 "value": 0.30,
             },
+        )
+
+
+class Chain:
+    def __init__(self, name, devices):
+        self.name = name
+        self.devices = list(devices)
+
+
+class Rack:
+    def __init__(self, nested):
+        self.name = "SIDE CHAIN 8"
+        self.class_name = "AudioEffectGroupDevice"
+        self.parameters = [Parameter("Device On", 1.0)]
+        self.chains = [Chain("Live 8 Compressor", [nested])]
+
+
+def _nested_compressor(track):
+    compressor = Device()
+    compressor.name = "Live 8 Compressor"
+    compressor.class_name = "Compressor2"
+    compressor.parameters = [
+        Parameter("Device On", 1.0),
+        Parameter("Threshold", 0.0),
+    ]
+    track.devices.append(Rack(compressor))
+    return compressor
+
+
+def test_device_parameter_ref_write_finds_nested_device_by_exact_identity():
+    bridge = FakeBridge()
+    track = bridge.song().tracks[0]
+    device = _nested_compressor(track)
+    parameter = device.parameters[1]
+    result = bounded_control.rpc_device_parameter_ref_set(
+        bridge,
+        {
+            "track_index": 0,
+            "expected_track_name": "Hats",
+            "expected_track_id": id(track),
+            "expected_device_name": "Live 8 Compressor",
+            "expected_device_class_name": "Compressor2",
+            "expected_device_id": id(device),
+            "parameter_index": 1,
+            "expected_parameter_name": "Threshold",
+            "expected_parameter_id": id(parameter),
+            "expected_current_value": 0.0,
+            "value": 0.2,
+        },
+    )
+    assert result["applied_value"] == 0.2
+    assert result["read_back_verified"] is True
+    assert [item["kind"] for item in result["device"]["path"]] == ["device", "chain", "device"]
+    assert result["device"]["path"][-1]["id"] == id(device)
+
+
+def test_device_parameter_ref_write_refuses_device_from_other_track():
+    bridge = FakeBridge()
+    track = bridge.song().tracks[0]
+    foreign = _nested_compressor(bridge.song().master_track)
+    parameter = foreign.parameters[1]
+    with pytest.raises(RuntimeError, match="not uniquely contained"):
+        bounded_control.rpc_device_parameter_ref_set(
+            bridge,
+            {
+                "track_index": 0,
+                "expected_track_name": track.name,
+                "expected_track_id": id(track),
+                "expected_device_name": foreign.name,
+                "expected_device_id": id(foreign),
+                "parameter_index": 1,
+                "expected_parameter_name": parameter.name,
+                "expected_parameter_id": id(parameter),
+                "expected_current_value": 0.0,
+                "value": 0.2,
+            },
+        )
+
+
+def test_device_parameter_ref_write_refuses_class_or_parameter_identity_change():
+    bridge = FakeBridge()
+    track = bridge.song().tracks[0]
+    device = _nested_compressor(track)
+    parameter = device.parameters[1]
+    base = {
+        "track_index": 0,
+        "expected_track_name": track.name,
+        "expected_track_id": id(track),
+        "expected_device_name": device.name,
+        "expected_device_id": id(device),
+        "parameter_index": 1,
+        "expected_parameter_name": parameter.name,
+        "expected_current_value": 0.0,
+        "value": 0.2,
+    }
+    with pytest.raises(RuntimeError, match="Device class identity mismatch"):
+        bounded_control.rpc_device_parameter_ref_set(
+            bridge, dict(base, expected_device_class_name="WrongClass")
+        )
+    with pytest.raises(RuntimeError, match="Parameter object identity changed"):
+        bounded_control.rpc_device_parameter_ref_set(
+            bridge, dict(base, expected_parameter_id=id(parameter) + 1)
         )
