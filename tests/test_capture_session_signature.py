@@ -48,5 +48,5 @@ def test_expected_set_signature_refuses_before_any_capture_effect(monkeypatch, t
             expected_set_signature="sig-old",
         )
 
-    assert len(FakeCaptureClient.instances) == 1
-    assert FakeCaptureClient.instances[0].calls == []
+    # Stale plans now fail before the effect-capable capture client is constructed.
+    assert FakeCaptureClient.instances == []

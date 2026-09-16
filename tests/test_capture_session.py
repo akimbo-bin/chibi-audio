@@ -84,6 +84,7 @@ class FakeCaptureClient:
     device_indices = {101: 0, 201: 0, 203: 2}
 
     def __init__(self, **_kwargs):
+        self.init_kwargs = dict(_kwargs)
         self.calls = []
         self.time = 0.0
         self.playing = False
@@ -430,6 +431,44 @@ def test_run_capture_session_coordinates_same_track_pre_post_and_records_provena
     transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
     assert transport_actions == ["stop", "play_until", "status"]
 
+
+
+def test_run_capture_session_budgets_long_play_and_stops_after_lost_response(monkeypatch, tmp_path):
+    import chibi_audio.capture_session as session
+
+    class ResponseLossCaptureClient(FakeCaptureClient):
+        def transport(self, action="status", *, time=None, end_time=None, **kwargs):
+            result = super().transport(action, time=time, end_time=end_time, **kwargs)
+            if action == "play_until":
+                raise TimeoutError("simulated lost play_until response")
+            return result
+
+    FakeCaptureClient.instances.clear()
+    reader = FakeReadClient()
+    monkeypatch.setattr(session, "LiveBridgeClient", lambda **_kwargs: reader)
+    monkeypatch.setattr(session, "LiveCaptureClient", ResponseLossCaptureClient)
+    monkeypatch.setattr(session.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(TimeoutError, match="lost play_until response"):
+        run_capture_session(
+            experiment_id="long-response-loss",
+            taps=[CaptureSessionTap(1, "Main", "master")],
+            output_dir=tmp_path / "final",
+            start_beat=0.0,
+            end_beat=64.0,
+            capture_root=tmp_path / "captures",
+            include_analysis=False,
+            settle_seconds=0.0,
+            timeout_margin=8.0,
+        )
+
+    client = ResponseLossCaptureClient.instances[-1]
+    # 64 beats at 120 BPM is 32 s; transport gets 32 + 8 margin + 5 grace.
+    assert client.init_kwargs["timeout"] == pytest.approx(45.0)
+    transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
+    assert transport_actions == ["stop", "play_until", "stop"]
+    configure_calls = [call[1] for call in client.calls if call[0] == "configure"]
+    assert [call["capture_enabled"] for call in configure_calls] == [True, False]
 
 def test_wait_for_capture_quiescence_accepts_file_complete_before_first_poll(monkeypatch, tmp_path):
     import chibi_audio.capture_session as session
