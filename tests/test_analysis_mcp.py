@@ -340,3 +340,169 @@ def test_capture_section_evidence_preserves_confirmed_effect_when_analysis_fails
     assert data["manifest_artifact"] == "section-captures/kiss-intro-analysis-fails/capture-manifest.json"
     assert data["analysis_error"] == "Chibi Audio analysis fabric could not safely complete post-capture analysis."
     assert "internal analysis failure detail" not in data["analysis_error"]
+
+
+def test_capture_section_master_stress_preflights_layout_before_capture(monkeypatch, tmp_path):
+    calls = []
+
+    def forbidden_capture(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("capture must not start after invalid tap preflight")
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", forbidden_capture)
+    server, _bridge = make_server(tmp_path, allow_writes=True)
+    with pytest.raises(Exception, match="premaster_label must select a master target captured at pre_fx"):
+        asyncio.run(
+            server.call_tool(
+                "capture_section_master_stress",
+                {
+                    "name": "Intro",
+                    "experiment_id": "bad-stress-layout",
+                    "tap_specs": [
+                        "211:MASTER_PRE:master",
+                        "212:MASTER_POST:master",
+                        "213:BASS_POST:BASS",
+                    ],
+                    "premaster_label": "MASTER_PRE",
+                    "master_label": "MASTER_POST",
+                    "source_labels": ["BASS_POST"],
+                },
+            )
+        )
+    assert calls == []
+
+
+def test_capture_section_master_stress_runs_managed_capture_then_attribution(monkeypatch, tmp_path):
+    events = []
+    capture_calls = {}
+
+    class OrderedStressBridge(FakeAnalysisBridge):
+        def attribute_capture_master_stress(self, manifest, **kwargs):
+            events.append("attribute")
+            result = super().attribute_capture_master_stress(manifest, **kwargs)
+            result["alignment"] = {"post_delay_ms": 110.0}
+            return result
+
+    def fake_run_managed_capture_session(**kwargs):
+        events.append("capture")
+        capture_calls.update(kwargs)
+        target = tmp_path / "section-captures" / "kiss-stress-proof" / "capture-manifest.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {
+                    "initial_set_signature": "sig-sections",
+                    "final_set_signature": "sig-prepared",
+                    "taps": [],
+                },
+            ),
+            restore={"final_set_signature": "sig-sections", "remove_created": True, "actions": []},
+        )
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", fake_run_managed_capture_session)
+    bridge = OrderedStressBridge()
+    server, _bridge = make_server(tmp_path, allow_writes=True, bridge=bridge)
+    catalog = tools(server)
+    assert catalog["capture_section_master_stress"].annotations.read_only_hint is False
+    assert catalog["capture_section_master_stress"].annotations.destructive_hint is True
+
+    result = asyncio.run(
+        server.call_tool(
+            "capture_section_master_stress",
+            {
+                "name": "Intro",
+                "experiment_id": "kiss-stress-proof",
+                "tap_specs": [
+                    "211:MASTER_PRE:pre_fx:master",
+                    "212:MASTER_POST:post_fx:master",
+                    "213:BASS_POST:BASS",
+                    "214:DRUMS_POST:DRUMS",
+                ],
+                "premaster_label": "MASTER_PRE",
+                "master_label": "MASTER_POST",
+                "source_labels": ["BASS_POST", "DRUMS_POST"],
+                "window_ms": 80.0,
+                "hop_ms": 10.0,
+                "max_latency_ms": 250.0,
+                "low_band_hz": 180.0,
+                "active_threshold_dbfs": -50.0,
+                "top_stress_fraction": 0.2,
+            },
+        )
+    )
+    data = result.structured_content
+    assert events == ["capture", "attribute"]
+    assert capture_calls["expected_set_signature"] == "sig-sections"
+    assert capture_calls["include_analysis"] is False
+    assert capture_calls["remove_created_after"] is True
+    assert [(tap.source_label, tap.signal_point, tap.target) for tap in capture_calls["taps"]] == [
+        ("MASTER_PRE", "pre_fx", "master"),
+        ("MASTER_POST", "post_fx", "master"),
+        ("BASS_POST", "post_fx", "BASS"),
+        ("DRUMS_POST", "post_fx", "DRUMS"),
+    ]
+    assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["analysis_state"] == "COMPLETED"
+    assert data["analysis_error"] is None
+    assert data["manifest_artifact"] == "section-captures/kiss-stress-proof/capture-manifest.json"
+    assert data["analysis"]["alignment"]["post_delay_ms"] == 110.0
+    assert bridge.calls[-1] == (
+        "stress",
+        data["manifest_artifact"],
+        data["attribution_request"],
+    )
+
+
+def test_capture_section_master_stress_preserves_confirmed_capture_when_attribution_fails(monkeypatch, tmp_path):
+    class FailingStressBridge(FakeAnalysisBridge):
+        def attribute_capture_master_stress(self, manifest, **kwargs):
+            raise RuntimeError("private attribution implementation failure")
+
+    def fake_run_managed_capture_session(**kwargs):
+        target = tmp_path / "section-captures" / "kiss-stress-fails" / "capture-manifest.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {"initial_set_signature": "sig-sections", "final_set_signature": "sig-prepared", "taps": []},
+            ),
+            restore={"final_set_signature": "sig-sections", "remove_created": True, "actions": []},
+        )
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", fake_run_managed_capture_session)
+    server, _bridge = make_server(tmp_path, allow_writes=True, bridge=FailingStressBridge())
+    result = asyncio.run(
+        server.call_tool(
+            "capture_section_master_stress",
+            {
+                "name": "Intro",
+                "experiment_id": "kiss-stress-fails",
+                "tap_specs": [
+                    "211:MASTER_PRE:pre_fx:master",
+                    "212:MASTER_POST:post_fx:master",
+                    "213:BASS_POST:BASS",
+                ],
+                "premaster_label": "MASTER_PRE",
+                "master_label": "MASTER_POST",
+                "source_labels": ["BASS_POST"],
+            },
+        )
+    )
+    data = result.structured_content
+    assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["analysis_state"] == "FAILED"
+    assert data["analysis"] is None
+    assert data["manifest_artifact"] == "section-captures/kiss-stress-fails/capture-manifest.json"
+    assert data["analysis_error"] == "Chibi Audio analysis fabric could not safely complete post-capture analysis."
+    assert "private attribution implementation failure" not in data["analysis_error"]

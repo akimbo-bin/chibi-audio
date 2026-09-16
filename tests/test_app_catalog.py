@@ -36,6 +36,7 @@ READ_ONLY_TOOLS = {
 WRITE_ADDITIONS = {
     "capture_section",
     "capture_section_evidence",
+    "capture_section_master_stress",
     "create_level_matched_ab",
     "rename_track",
     "set_device_enabled",
