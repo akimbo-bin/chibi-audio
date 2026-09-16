@@ -1,0 +1,37 @@
+name: Analysis fabric
+
+on:
+  pull_request:
+    paths:
+      - "src/chibi_audio/analysis/**"
+      - "tests/test_analysis_*.py"
+      - "tests/integration/test_basic_pitch_analysis.py"
+      - ".github/workflows/analysis-fabric.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[analysis]' pytest 'librosa==0.11.0'
+      - run: python -m compileall -q src/chibi_audio/analysis
+      - run: pytest -q tests/test_analysis_*.py
+
+  basic-pitch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[analysis]' pytest 'basic-pitch==0.4.0'
+      - run: python -m compileall -q src/chibi_audio/analysis
+      - run: pytest -q tests/integration/test_basic_pitch_analysis.py
