@@ -325,7 +325,19 @@ def test_run_capture_session_coordinates_same_track_pre_post_and_records_provena
     monkeypatch.setattr(session, "LiveBridgeClient", lambda **_kwargs: reader)
     monkeypatch.setattr(session, "LiveCaptureClient", FakeCaptureClient)
     monkeypatch.setattr(session.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(session, "_wait_for_capture_quiescence", lambda *_args, **_kwargs: {})
+    quiescence_capture_states = []
+
+    def fake_wait_for_quiescence(*_args, **_kwargs):
+        client = FakeCaptureClient.instances[-1]
+        states = [
+            call[1]["capture_enabled"]
+            for call in client.calls
+            if call[0] == "configure"
+        ]
+        quiescence_capture_states.append(states)
+        return {}
+
+    monkeypatch.setattr(session, "_wait_for_capture_quiescence", fake_wait_for_quiescence)
 
     raw_paths = {
         1: tmp_path / "raw-main.wav",
@@ -418,6 +430,7 @@ def test_run_capture_session_coordinates_same_track_pre_post_and_records_provena
         False,
         False,
     ]
+    assert quiescence_capture_states == [[True, True, True, False, False, False]]
     assert all(call["expected_set_signature"] == "sig-1" for call in configure_calls)
     assert [call["expected_device_id"] for call in configure_calls] == [101, 201, 203, 203, 201, 101]
     assert [call["signal_point"] for call in configure_calls] == [

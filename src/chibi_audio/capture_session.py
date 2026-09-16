@@ -414,6 +414,30 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     temp.replace(path)
 
 
+def _wait_for_transport_completion(
+    capture_client: LiveCaptureClient,
+    *,
+    expected_set_signature: str,
+    end_beat: float,
+    timeout: float,
+    poll_interval: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = capture_client.transport(
+            "status", expected_set_signature=expected_set_signature
+        )
+        if not bool(status.get("playing")):
+            observed_stop = status.get("last_scheduled_stop_time")
+            if observed_stop is None:
+                observed_stop = status.get("time", end_beat)
+            if float(observed_stop) + 1.0e-6 < float(end_beat):
+                raise CaptureError("Live transport stopped before requested end beat")
+            return status
+        time.sleep(poll_interval)
+    raise CaptureError("Live transport did not stop before capture timeout")
+
+
 def run_capture_session(
     *,
     experiment_id: str,
@@ -505,27 +529,18 @@ def run_capture_session(
         )
         transport_start = float(play.get("scheduled_start_time", start_beat))
 
-        _wait_for_capture_quiescence(
-            root,
-            resolved,
-            before,
+        status = _wait_for_transport_completion(
+            capture_client,
+            expected_set_signature=set_signature,
+            end_beat=float(end_beat),
             timeout=expected_seconds + timeout_margin,
             poll_interval=poll_interval,
-            # ChibiTap writes 48 kHz stereo float32 WAV. Requiring at least the
-            # requested payload size avoids mistaking a barely-created/partial
-            # file for a completed short capture when no growth was observed.
-            minimum_bytes=target_samples * 2 * 4,
         )
-        status = capture_client.transport("status", expected_set_signature=set_signature)
-        if bool(status.get("playing")):
-            raise CaptureError("ChibiTap artifacts stopped growing while Live transport still reported playing")
         observed_stop = status.get("last_scheduled_stop_time")
         if observed_stop is None:
             observed_stop = status.get("time", end_beat)
         transport_stop = float(observed_stop)
         play_started = False
-        if transport_stop + 1.0e-6 < float(end_beat):
-            raise CaptureError("Live transport stopped before requested end beat")
     finally:
         if play_started:
             try:
@@ -547,6 +562,20 @@ def run_capture_session(
                 cleanup_errors.append(f"{tap.track_name}: {exc}")
         if cleanup_errors:
             raise CaptureError("failed to disarm ChibiTap instances: " + "; ".join(cleanup_errors))
+
+    # Capture must be disarmed before file finality is required. ChibiTap can
+    # continue receiving audio-engine callbacks after Arrangement transport
+    # stops, so waiting for quiescence while Capture is still On can race the
+    # plugin writer indefinitely. Once all taps are Off, require the complete
+    # requested payload and a stable quiet window before finalization.
+    _wait_for_capture_quiescence(
+        root,
+        resolved,
+        before,
+        timeout=timeout_margin,
+        poll_interval=poll_interval,
+        minimum_bytes=target_samples * 2 * 4,
+    )
 
     raw_inputs: list[TapCaptureInput] = []
     raw_artifacts: dict[int, dict[str, Any]] = {}
