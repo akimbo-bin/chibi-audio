@@ -16,6 +16,7 @@ from .control import (
 from .harshness import analyze_harshness
 from .live import LiveBridgeClient, LivePilotWriteClient
 from .sidechain_compare import compare_sidechain_captures
+from .sidechain_intent import propose_sidechain_intents
 from .sidechain_verify import verify_sidechain_capture
 
 
@@ -117,6 +118,28 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "target_post_label": {"type": "string", "minLength": 1},
                 "output_dir": {"type": "string", "minLength": 1},
                 "comparison_id": {"type": "string", "minLength": 1},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "propose_sidechain_intents": {
+        "description": (
+            "Use a persisted capture-analysis report to propose transparent sidechain processing classes for one source against candidate targets. "
+            "This is analysis-only; every heuristic threshold is returned with the evidence."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["capture_analysis", "source_label"],
+            "properties": {
+                "capture_analysis": {"type": "string", "minLength": 1},
+                "source_label": {"type": "string", "minLength": 1},
+                "target_labels": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "uniqueItems": True,
+                },
+                "time_tolerance_seconds": {"type": "number", "minimum": 0, "maximum": 5},
+                "max_moments_per_pair": {"type": "integer", "minimum": 1, "maximum": 16},
             },
             "additionalProperties": False,
         },
@@ -400,6 +423,7 @@ class ChibiAudioFacade:
             ),
             "verify_sidechain_capture": self._verify_sidechain_capture,
             "compare_sidechain_captures": self._compare_sidechain_captures,
+            "propose_sidechain_intents": self._propose_sidechain_intents,
             "device_parameters": lambda a: self.read.call(
                 "device_parameters",
                 {"ref": {"id": int(a["device_id"])}, "limit": int(a.get("limit", 256))},
@@ -462,6 +486,23 @@ class ChibiAudioFacade:
         ab = Path(str(payload["level_matched_ab_manifest"])).resolve()
         payload["level_matched_ab_manifest"] = ab.relative_to(root).as_posix()
         return payload
+
+    def _propose_sidechain_intents(self, args: dict[str, Any]) -> dict[str, Any]:
+        source = self._resolve_artifact(str(args["capture_analysis"]))
+        try:
+            payload = json.loads(source.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise FacadeError(f"could not read capture-analysis artifact: {source}") from exc
+        if not isinstance(payload, dict):
+            raise FacadeError("capture-analysis artifact must contain a JSON object")
+        targets = args.get("target_labels")
+        return propose_sidechain_intents(
+            payload,
+            source_label=str(args["source_label"]),
+            target_labels=None if targets is None else [str(value) for value in targets],
+            time_tolerance_seconds=float(args.get("time_tolerance_seconds", 0.08)),
+            max_moments_per_pair=int(args.get("max_moments_per_pair", 6)),
+        )
 
     def _track_mixer_state(self, args: dict[str, Any]) -> dict[str, Any]:
         index = int(args["track_index"])

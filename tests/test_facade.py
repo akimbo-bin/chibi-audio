@@ -320,3 +320,50 @@ def test_artifact_output_directory_refuses_escape(tmp_path):
     facade = make_facade(root)
     with pytest.raises(FacadeError, match="escapes"):
         facade._resolve_artifact_dir("../outside")
+
+
+
+def test_sidechain_intent_proposal_is_artifact_confined_and_analysis_only(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    analysis = root / "analysis.json"
+    analysis.write_text('{"schema_version":"chibi-audio-capture-analysis/v1","taps":[]}', encoding="utf-8")
+    observed = {}
+
+    def fake_propose(payload, **kwargs):
+        observed["payload"] = payload
+        observed["kwargs"] = kwargs
+        return {"effect_state": "NOT_STARTED", "candidate_count": 2}
+
+    monkeypatch.setattr("chibi_audio.facade.propose_sidechain_intents", fake_propose)
+    facade = make_facade(root)
+    result = facade.call(
+        "propose_sidechain_intents",
+        {
+            "capture_analysis": "analysis.json",
+            "source_label": "VOX_POST",
+            "target_labels": ["FX_POST", "BASS_POST"],
+            "time_tolerance_seconds": 0.08,
+            "max_moments_per_pair": 6,
+        },
+    )
+    assert result == {"effect_state": "NOT_STARTED", "candidate_count": 2}
+    assert observed["payload"]["schema_version"] == "chibi-audio-capture-analysis/v1"
+    assert observed["kwargs"]["source_label"] == "VOX_POST"
+    assert observed["kwargs"]["target_labels"] == ["FX_POST", "BASS_POST"]
+    assert observed["kwargs"]["time_tolerance_seconds"] == 0.08
+    assert observed["kwargs"]["max_moments_per_pair"] == 6
+    assert facade.write.calls == []
+    assert "propose_sidechain_intents" in facade.tool_names()
+
+
+def test_sidechain_intent_proposal_rejects_invalid_json(tmp_path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    (root / "analysis.json").write_text("not-json", encoding="utf-8")
+    facade = make_facade(root)
+    with pytest.raises(FacadeError, match="could not read capture-analysis"):
+        facade.call(
+            "propose_sidechain_intents",
+            {"capture_analysis": "analysis.json", "source_label": "VOX_POST"},
+        )
