@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,10 +63,10 @@ def tools(server):
     return {item.name: item for item in asyncio.run(server.list_tools())}
 
 
-def make_server(tmp_path):
-    bridge = FakeAnalysisBridge()
+def make_server(tmp_path, *, allow_writes=False, bridge=None):
+    bridge = bridge or FakeAnalysisBridge()
     server = build_mcp_server(
-        AudioMcpSettings(artifact_root=tmp_path, allow_writes=False),
+        AudioMcpSettings(artifact_root=tmp_path, allow_writes=allow_writes),
         facade=FakeFacade(),
         locator_client=FakeLocatorClient(),
         analysis_bridge=bridge,
@@ -152,7 +153,9 @@ def test_compare_reports_does_not_reopen_audio(tmp_path):
 
 def test_read_only_server_still_omits_capture_section(tmp_path):
     server, _bridge = make_server(tmp_path)
-    assert "capture_section" not in tools(server)
+    catalog = tools(server)
+    assert "capture_section" not in catalog
+    assert "capture_section_evidence" not in catalog
 
 
 def test_plan_section_evidence_combines_locator_capture_and_analysis_without_effects(tmp_path):
@@ -180,3 +183,118 @@ def test_plan_section_evidence_combines_locator_capture_and_analysis_without_eff
         ("audio.levels", "audio.spectrum"),
         {"max_cost": "MODERATE"},
     )
+
+
+def test_capture_section_evidence_preflights_before_capture_and_returns_analysis(monkeypatch, tmp_path):
+    events = []
+    capture_calls = {}
+
+    class OrderedAnalysisBridge(FakeAnalysisBridge):
+        def plan_request(self, capabilities, **kwargs):
+            events.append("plan")
+            return super().plan_request(capabilities, **kwargs)
+
+        def analyze_capture_manifest(self, manifest, capabilities, **kwargs):
+            events.append("analyze")
+            return super().analyze_capture_manifest(manifest, capabilities, **kwargs)
+
+    def fake_run_managed_capture_session(**kwargs):
+        events.append("capture")
+        capture_calls.update(kwargs)
+        assert events == ["plan", "capture"]
+        target = tmp_path / "section-captures" / "kiss-intro-evidence" / "capture-manifest.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {
+                    "initial_set_signature": "sig-sections",
+                    "final_set_signature": "sig-prepared",
+                    "taps": [],
+                },
+            ),
+            restore={"final_set_signature": "sig-sections", "remove_created": True, "actions": []},
+        )
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", fake_run_managed_capture_session)
+    bridge = OrderedAnalysisBridge()
+    server, _bridge = make_server(tmp_path, allow_writes=True, bridge=bridge)
+    catalog = tools(server)
+    assert catalog["capture_section_evidence"].annotations.read_only_hint is False
+    assert catalog["capture_section_evidence"].annotations.destructive_hint is True
+
+    result = asyncio.run(
+        server.call_tool(
+            "capture_section_evidence",
+            {
+                "name": "Intro",
+                "experiment_id": "kiss-intro-evidence",
+                "tap_specs": ["1:Main:master", "2:BASS:BASS"],
+                "capabilities": ["audio.levels", "audio.spectrum"],
+                "max_cost": "MODERATE",
+            },
+        )
+    )
+    data = result.structured_content
+    assert events == ["plan", "capture", "analyze"]
+    assert capture_calls["expected_set_signature"] == "sig-sections"
+    assert capture_calls["include_analysis"] is False
+    assert capture_calls["remove_created_after"] is True
+    assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["analysis_state"] == "COMPLETED"
+    assert data["analysis_error"] is None
+    assert data["prepared_set_signature"] == "sig-prepared"
+    assert data["manifest_artifact"] == "section-captures/kiss-intro-evidence/capture-manifest.json"
+    assert data["analysis_plan"]["selected_analyzers"][0]["name"] == "fake"
+    assert data["analysis"]["capture_manifest"] == data["manifest_artifact"]
+
+
+def test_capture_section_evidence_preserves_confirmed_effect_when_analysis_fails(monkeypatch, tmp_path):
+    class FailingAnalysisBridge(FakeAnalysisBridge):
+        def analyze_capture_manifest(self, manifest, capabilities, **kwargs):
+            self.calls.append(("manifest", manifest, tuple(capabilities), kwargs))
+            raise RuntimeError("internal analysis failure detail")
+
+    def fake_run_managed_capture_session(**kwargs):
+        target = tmp_path / "section-captures" / "kiss-intro-analysis-fails" / "capture-manifest.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {
+                    "initial_set_signature": "sig-sections",
+                    "final_set_signature": "sig-prepared",
+                    "taps": [],
+                },
+            ),
+            restore={"final_set_signature": "sig-sections", "remove_created": True, "actions": []},
+        )
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", fake_run_managed_capture_session)
+    server, _bridge = make_server(tmp_path, allow_writes=True, bridge=FailingAnalysisBridge())
+    result = asyncio.run(
+        server.call_tool(
+            "capture_section_evidence",
+            {
+                "name": "Intro",
+                "experiment_id": "kiss-intro-analysis-fails",
+                "tap_specs": ["1:Main:master"],
+                "capabilities": ["audio.levels"],
+            },
+        )
+    )
+    data = result.structured_content
+    assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["analysis_state"] == "FAILED"
+    assert data["analysis"] is None
+    assert data["manifest_artifact"] == "section-captures/kiss-intro-analysis-fails/capture-manifest.json"
+    assert data["analysis_error"] == "Chibi Audio analysis fabric could not safely complete post-capture analysis."
+    assert "internal analysis failure detail" not in data["analysis_error"]

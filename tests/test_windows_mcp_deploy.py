@@ -61,3 +61,4 @@ def test_tunnel_runbook_keeps_live_loopback_and_tunnel_outbound():
     assert "stdio child process" in source
     assert "CHIBI_AUDIO_MCP_ALLOW_WRITES=0" in source
     assert "capture_section" in source
+    assert "capture_section_evidence" in source

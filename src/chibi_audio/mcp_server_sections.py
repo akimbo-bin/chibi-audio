@@ -29,6 +29,13 @@ TapSpecList = Annotated[list[TapSpec], Field(max_length=32)]
 ExperimentId = Annotated[str, Field(min_length=1, max_length=200)]
 
 
+def _safe_post_capture_analysis_error(exc: Exception) -> str:
+    """Preserve confirmed capture effects while sanitizing analysis failures."""
+    if isinstance(exc, (ValueError, FileNotFoundError, TypeError, KeyError)):
+        return str(exc)
+    return "Chibi Audio analysis fabric could not safely complete post-capture analysis."
+
+
 def build_mcp_server(
     settings: AudioMcpSettings,
     *,
@@ -248,6 +255,96 @@ def build_mcp_server(
                     "section": plan["section"],
                     "capture_request": plan["capture_request"],
                     "manifest_artifact": relative_manifest.as_posix(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                raise _safe_tool_error(exc) from None
+
+        @server.tool(
+            title="Capture and analyze one named song section",
+            description=(
+                "Validate the requested analysis capabilities/cost ceiling before any Live effect, then resolve an "
+                "artist-authored locator section, execute one managed ChibiTap capture for that exact beat range, "
+                "and analyze the finalized capture manifest. If post-capture analysis fails, the confirmed capture "
+                "effect and manifest are still returned so effect certainty is preserved."
+            ),
+            annotations=write_annotations,
+            structured_output=True,
+        )
+        def capture_section_evidence(
+            name: ObjectName,
+            experiment_id: ExperimentId,
+            tap_specs: TapSpecList,
+            capabilities: AnalysisCapabilityList,
+            max_cost: AnalysisCostName = "MODERATE",
+            occurrence: SectionOccurrence | None = None,
+            limit: LocatorLimit = 256,
+        ) -> dict[str, Any]:
+            try:
+                if not tap_specs:
+                    raise ValueError("capture_section_evidence requires at least one tap spec")
+
+                # This must complete before topology preparation, transport, or ChibiTap mutation.
+                analysis_plan = analysis.plan_request(capabilities, max_cost=max_cost)
+
+                section_map = fresh_sections(limit)
+                plan = build_section_capture_plan(
+                    section_map,
+                    name,
+                    occurrence=occurrence,
+                    tap_specs=tap_specs,
+                )
+                set_signature = str(plan.get("set_signature") or "")
+                if not set_signature:
+                    raise ValueError("locator read did not return a Set signature")
+
+                safe_experiment = _safe_id(experiment_id)
+                output_dir = settings.artifact_root / "section-captures" / safe_experiment
+                capture_result = run_managed_capture_session(
+                    experiment_id=safe_experiment,
+                    taps=[parse_session_tap(value) for value in tap_specs],
+                    output_dir=output_dir,
+                    start_beat=float(plan["capture_request"]["start_beat"]),
+                    end_beat=float(plan["capture_request"]["end_beat"]),
+                    host="127.0.0.1",
+                    port=settings.live_port,
+                    # Avoid the legacy capture-finalizer analysis pass; the capability-driven fabric below is
+                    # authoritative for this compound operation.
+                    include_analysis=False,
+                    expected_set_signature=set_signature,
+                    remove_created_after=True,
+                )
+
+                manifest = capture_result.manifest_path.resolve()
+                root = settings.artifact_root.resolve()
+                relative_manifest = manifest.relative_to(root)
+                manifest_artifact = relative_manifest.as_posix()
+
+                analysis_state = "COMPLETED"
+                analysis_result: dict[str, Any] | None = None
+                analysis_error: str | None = None
+                try:
+                    analysis_result = analysis.analyze_capture_manifest(
+                        manifest_artifact,
+                        capabilities,
+                        max_cost=max_cost,
+                    )
+                except Exception as exc:  # noqa: BLE001 - capture effect is already confirmed; do not erase it.
+                    analysis_state = "FAILED"
+                    analysis_error = _safe_post_capture_analysis_error(exc)
+
+                return {
+                    "effect_state": "STARTED_CONFIRMED",
+                    "analysis_state": analysis_state,
+                    "analysis_error": analysis_error,
+                    "set_signature": set_signature,
+                    "prepared_set_signature": capture_result.topology.final_set_signature,
+                    "topology": capture_result.topology.as_dict(),
+                    "restore": capture_result.restore,
+                    "section": plan["section"],
+                    "capture_request": plan["capture_request"],
+                    "manifest_artifact": manifest_artifact,
+                    "analysis_plan": analysis_plan,
+                    "analysis": analysis_result,
                 }
             except Exception as exc:  # noqa: BLE001
                 raise _safe_tool_error(exc) from None
