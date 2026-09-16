@@ -252,6 +252,40 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "set_device_parameter_ref": {
+        "description": (
+            "Set one exact recursively contained device parameter by Live object id with track/device/parameter identity and before-state guards."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": [
+                "expected_track_name",
+                "expected_device_name",
+                "expected_device_id",
+                "parameter_index",
+                "expected_parameter_name",
+                "expected_current_value",
+                "value",
+            ],
+            "properties": {
+                "placement": {"enum": ["track", "master"], "default": "track"},
+                "track_index": {"type": "integer", "minimum": 0},
+                "expected_track_name": {"type": "string", "minLength": 1},
+                "expected_track_id": {"type": "integer"},
+                "expected_set_signature": {"type": "string", "minLength": 1},
+                "expected_device_name": {"type": "string", "minLength": 1},
+                "expected_device_id": {"type": "integer"},
+                "expected_device_class_name": {"type": "string", "minLength": 1},
+                "parameter_index": {"type": "integer", "minimum": 0},
+                "expected_parameter_name": {"type": "string", "minLength": 1},
+                "expected_parameter_id": {"type": "integer"},
+                "expected_current_value": {"type": "number"},
+                "value": {"type": "number"},
+                "coerce": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    },
     "set_device_enabled": {
         "description": "Toggle an exact host-exposed device on/off parameter with identity and before-state guards.",
         "inputSchema": {
@@ -354,6 +388,7 @@ class ChibiAudioFacade:
             "set_track_pan": lambda a: self.write.set_track_pan(**a),
             "set_track_property": lambda a: self.write.set_track_property(**a),
             "set_device_parameter": lambda a: self.write.set_device_parameter(**a),
+            "set_device_parameter_ref": lambda a: self.write.set_device_parameter_ref(**a),
             "set_device_enabled": lambda a: self.write.set_device_enabled(**a),
         }
         if name not in handlers:

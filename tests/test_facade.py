@@ -62,6 +62,9 @@ class FakeWrite:
     def set_device_parameter(self, **kwargs):
         return self._record("set_device_parameter", **kwargs)
 
+    def set_device_parameter_ref(self, **kwargs):
+        return self._record("set_device_parameter_ref", **kwargs)
+
     def set_device_enabled(self, **kwargs):
         return self._record("set_device_enabled", **kwargs)
 
@@ -234,3 +237,30 @@ def test_sidechain_capture_verifier_is_artifact_confined_and_analysis_only(tmp_p
     assert observed["kwargs"]["trigger_threshold_dbfs"] == -24.0
     assert "verify_sidechain_capture" in facade.tool_names()
     assert facade.write.calls == []
+
+
+def test_nested_device_parameter_facade_routes_exact_ref_without_device_index():
+    facade = make_facade()
+    result = facade.call(
+        "set_device_parameter_ref",
+        {
+            "track_index": 34,
+            "expected_track_name": "BASS",
+            "expected_track_id": 3400,
+            "expected_set_signature": "sig-sidechain",
+            "expected_device_name": "Live 8 Compressor",
+            "expected_device_class_name": "Compressor2",
+            "expected_device_id": 7777,
+            "parameter_index": 1,
+            "expected_parameter_name": "Threshold",
+            "expected_parameter_id": 8888,
+            "expected_current_value": 0.0,
+            "value": 0.1,
+        },
+    )
+    assert result["method"] == "set_device_parameter_ref"
+    _, params = facade.write.calls[-1]
+    assert params["expected_device_id"] == 7777
+    assert params["expected_device_class_name"] == "Compressor2"
+    assert params["expected_parameter_id"] == 8888
+    assert "device_index" not in params
