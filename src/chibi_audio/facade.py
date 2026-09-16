@@ -310,7 +310,7 @@ class ChibiAudioFacade:
                 "get",
                 {
                     "ref": {"path": f"song tracks {index} mixer_device {parameter}"},
-                    "properties": ["name", "value", "min", "max", "display_value"],
+                    "properties": ["name", "value", "min", "max"],
                 },
             )
         return {"track_index": index, "mixer": result}

@@ -141,3 +141,12 @@ def test_typed_write_routes_without_generic_fallback():
     )
     assert result["method"] == "set_track_pan"
     assert facade.write.calls[-1][1]["expected_track_name"] == "Hats"
+
+
+def test_track_mixer_state_avoids_optional_live_display_value_property():
+    facade = make_facade()
+    result = facade.call("track_mixer_state", {"track_index": 1})
+    assert result["track_index"] == 1
+    get_calls = [params for method, params in facade.read.calls if method == "get"]
+    assert len(get_calls) == 2
+    assert all(params["properties"] == ["name", "value", "min", "max"] for params in get_calls)
