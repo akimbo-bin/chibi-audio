@@ -1,4 +1,4 @@
-# Live connection contract
+﻿# Live connection contract
 This document defines the model-facing boundary between Chibi Audio and Ableton Live.
 ## Goals
 - Every worker gets the same typed capability surface.
@@ -40,6 +40,7 @@ The primary capture surface is ChibiTap plus bounded transport:
 The legacy `agent_audio_tap` Max-for-Live command path (`open/start/stop/status`) remains advertised only as an experimental/fallback capture implementation.
 
 Capture authority does not imply arbitrary device insertion, soloing, routing edits, broad parameter writes, or GUI control. Those remain separate typed capabilities.
+Capture sessions record observed mixer context (active solos plus tapped-target mute/solo state) in the experiment manifest and surface suppression warnings. This is provenance only: capture must not silently clear solo/mute state to manufacture non-silent evidence.
 ## Capture artifact lifecycle
 1. Observe fresh Set signature, target device identity, and current ChibiTap Capture value.
 2. Create an experiment/capture plan with source identity and musical range.

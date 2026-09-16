@@ -113,14 +113,35 @@ def test_capture_transport_seek_and_guards():
     assert result["method"] == "capture_transport"
     params = client.calls[-1][1]
     assert params == {"action": "seek", "time": 68.0, "expected_set_signature": "sig-2"}
+
+    scheduled = client.transport(
+        "play_until",
+        time=64.0,
+        end_time=68.0,
+        expected_set_signature="sig-range",
+    )
+    assert scheduled["method"] == "capture_transport"
+    assert client.calls[-1][1] == {
+        "action": "play_until",
+        "time": 64.0,
+        "end_time": 68.0,
+        "expected_set_signature": "sig-range",
+    }
+
     with pytest.raises(LiveBridgeError, match="seek requires time"):
         client.transport("seek")
-    with pytest.raises(LiveBridgeError, match="must be status, seek, play, or stop"):
+    with pytest.raises(LiveBridgeError, match="play_until requires time"):
+        client.transport("play_until", end_time=68.0)
+    with pytest.raises(LiveBridgeError, match="play_until requires end_time"):
+        client.transport("play_until", time=64.0)
+    with pytest.raises(LiveBridgeError, match="greater than time"):
+        client.transport("play_until", time=68.0, end_time=68.0)
+    with pytest.raises(LiveBridgeError, match="only valid for play_until"):
+        client.transport("status", end_time=68.0)
+    with pytest.raises(LiveBridgeError, match="must be status"):
         client.transport("continue")
     with pytest.raises(LiveBridgeError, match="time must be >= 0"):
         client.transport("status", time=-1)
-
-
 
 def test_chibitap_setup_targets_exact_track_identity():
     assert "chibitap_setup" in CAPTURE_METHODS
@@ -134,6 +155,7 @@ def test_chibitap_setup_targets_exact_track_identity():
     assert result["method"] == "chibitap_setup"
     assert client.calls[-1][1] == {
         "placement": "track",
+        "signal_point": "post_fx",
         "track_index": 34,
         "expected_track_name": "BASS",
         "expected_set_signature": "sig-setup",
@@ -157,6 +179,7 @@ def test_chibitap_configure_guards_tap_id_and_capture():
     assert result["method"] == "chibitap_configure"
     assert client.calls[-1][1] == {
         "placement": "track",
+        "signal_point": "post_fx",
         "expected_device_id": 9876,
         "track_index": 53,
         "expected_track_name": "DRUMS",
@@ -184,3 +207,30 @@ def test_chibitap_refresh_is_explicit_and_guarded():
         "expected_capture_value": 0.0,
         "expected_set_signature": "sig-refresh",
     }
+
+
+def test_chibitap_signal_point_validation_and_remove():
+    client = FakeCaptureClient()
+    with pytest.raises(LiveBridgeError, match="signal_point"):
+        client.setup_chibitap(signal_point="middle")
+    result = client.remove_chibitap(
+        placement="track",
+        signal_point="pre_fx",
+        track_index=23,
+        expected_track_name="24-Audio",
+        expected_device_id=4321,
+        expected_capture_enabled=False,
+        expected_set_signature="sig-remove",
+    )
+    assert result["method"] == "chibitap_remove"
+    assert client.calls[-1][1] == {
+        "placement": "track",
+        "signal_point": "pre_fx",
+        "expected_device_id": 4321,
+        "expected_capture_enabled": False,
+        "track_index": 23,
+        "expected_track_name": "24-Audio",
+        "expected_set_signature": "sig-remove",
+    }
+    with pytest.raises(LiveBridgeError, match="expected_capture_enabled=False"):
+        client.remove_chibitap(expected_device_id=1, expected_capture_enabled=True)
