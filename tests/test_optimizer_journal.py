@@ -443,6 +443,8 @@ def test_journal_sweep_persists_and_recomputes_clean_loudness_knee(tmp_path: Pat
         candidates=[candidates[2], candidates[0], candidates[1]],
         analysis_label="optimizer-evidence",
         tap_id=1,
+        drive_target="master:Pro-L 2",
+        drive_parameter="Gain",
         goal=_sweep_goal(),
         policy=CleanLoudnessSweepPolicy(
             max_points=4,
@@ -456,6 +458,18 @@ def test_journal_sweep_persists_and_recomputes_clean_loudness_knee(tmp_path: Pat
     assert payload["mutation_effect_state"] == "NOT_STARTED"
     assert [item["drive_db"] for item in payload["candidates"]] == [0.5, 1.0, 1.5]
     assert payload["baseline"]["experiment_id"] == "sweep-baseline"
+    assert payload["drive_change"] == {
+        "target": "master:Pro-L 2",
+        "parameter": "Gain",
+        "unit": "dB",
+    }
+    assert payload["candidates"][0]["declared_change"] == {
+        "target": "master:Pro-L 2",
+        "parameter": "Gain",
+        "before": 12.4,
+        "after": 12.9,
+        "unit": "dB",
+    }
     assert payload["sweep"]["knee"]["estimated"] is True
     assert payload["sweep"]["knee"]["reason"] == "marginal_efficiency_below_threshold"
     assert payload["sweep"]["knee"]["last_clean_point"]["drive_db"] == 1.0
@@ -470,6 +484,8 @@ def test_journal_sweep_verifier_refuses_tampered_sweep_result(tmp_path: Path) ->
         candidates=candidates,
         analysis_label="optimizer-evidence",
         tap_id=1,
+        drive_target="master:Pro-L 2",
+        drive_parameter="Gain",
         goal=_sweep_goal(),
         policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
         output_path=output,
@@ -491,6 +507,8 @@ def test_journal_sweep_verifier_refuses_tampered_candidate_analysis(tmp_path: Pa
         candidates=candidates,
         analysis_label="optimizer-evidence",
         tap_id=1,
+        drive_target="master:Pro-L 2",
+        drive_parameter="Gain",
         goal=_sweep_goal(),
         policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
         output_path=output,
@@ -517,6 +535,8 @@ def test_journal_sweep_refuses_candidate_from_different_family(tmp_path: Path) -
             candidates=candidates,
             analysis_label="optimizer-evidence",
             tap_id=1,
+            drive_target="master:Pro-L 2",
+            drive_parameter="Gain",
             goal=_sweep_goal(),
             policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
             output_path=tmp_path / "should-not-exist.json",
@@ -532,6 +552,8 @@ def test_journal_sweep_refuses_overwriting_bound_journal(tmp_path: Path) -> None
             candidates=candidates,
             analysis_label="optimizer-evidence",
             tap_id=1,
+            drive_target="master:Pro-L 2",
+            drive_parameter="Gain",
             goal=_sweep_goal(),
             policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
             output_path=candidates[0][1],
@@ -548,8 +570,53 @@ def test_journal_sweep_refuses_invalid_drive_before_writing_output(tmp_path: Pat
             candidates=[("loud", candidates[0][1])],  # type: ignore[list-item]
             analysis_label="optimizer-evidence",
             tap_id=1,
+            drive_target="master:Pro-L 2",
+            drive_parameter="Gain",
             goal=_sweep_goal(),
             policy=CleanLoudnessSweepPolicy(max_points=1, min_marginal_lu_per_db=0.5),
             output_path=output,
         )
     assert not output.exists()
+
+def test_journal_sweep_refuses_drive_label_mismatch_with_declared_change(tmp_path: Path) -> None:
+    baseline, candidates, _ = _prepare_sweep_family(tmp_path)
+    output = tmp_path / "mislabeled-drive.json"
+
+    with pytest.raises(CaptureError, match="does not match declared experiment change"):
+        create_clean_loudness_journal_sweep(
+            baseline_journal=baseline,
+            candidates=[(0.75, candidates[0][1])],
+            analysis_label="optimizer-evidence",
+            tap_id=1,
+            drive_target="master:Pro-L 2",
+            drive_parameter="Gain",
+            goal=_sweep_goal(),
+            policy=CleanLoudnessSweepPolicy(max_points=1, min_marginal_lu_per_db=0.5),
+            output_path=output,
+        )
+    assert not output.exists()
+
+
+def test_journal_sweep_verifier_refuses_declared_change_relabeling(tmp_path: Path) -> None:
+    baseline, candidates, _ = _prepare_sweep_family(tmp_path)
+    output = tmp_path / "declared-change.json"
+    create_clean_loudness_journal_sweep(
+        baseline_journal=baseline,
+        candidates=candidates,
+        analysis_label="optimizer-evidence",
+        tap_id=1,
+        drive_target="master:Pro-L 2",
+        drive_parameter="Gain",
+        goal=_sweep_goal(),
+        policy=CleanLoudnessSweepPolicy(max_points=3, min_marginal_lu_per_db=0.5),
+        output_path=output,
+    )
+
+    candidate_path = candidates[0][1]
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["changes"][0]["before"] = 13.0
+    candidate["changes"][0]["after"] = 13.5
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    with pytest.raises(CaptureError, match="declared change no longer matches journal"):
+        verify_clean_loudness_journal_sweep(output)

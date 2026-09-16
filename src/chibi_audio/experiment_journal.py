@@ -583,12 +583,61 @@ def _validate_sweep_journal_family(
         )
 
 
+def _declared_drive_change(
+    journal: dict[str, Any],
+    *,
+    target: str,
+    parameter: str,
+) -> dict[str, Any]:
+    if not target.strip() or not parameter.strip():
+        raise CaptureError("clean loudness sweep drive target/parameter must not be empty")
+    changes = journal.get("changes")
+    if not isinstance(changes, list):
+        raise CaptureError("clean loudness sweep candidate changes must be a list")
+    matches = [
+        change
+        for change in changes
+        if isinstance(change, dict)
+        and change.get("target") == target
+        and change.get("parameter") == parameter
+    ]
+    if len(matches) != 1:
+        raise CaptureError(
+            "clean loudness sweep candidate must declare exactly one matching drive change"
+        )
+    change = matches[0]
+    if str(change.get("unit") or "").lower() != "db":
+        raise CaptureError("clean loudness sweep drive change must use dB units")
+    before = change.get("before")
+    after = change.get("after")
+    for name, value in (("before", before), ("after", after)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise CaptureError(f"clean loudness sweep drive {name} must be a finite number")
+        if not math.isfinite(float(value)):
+            raise CaptureError(f"clean loudness sweep drive {name} must be a finite number")
+    before_value = float(before)
+    after_value = float(after)
+    drive_db = after_value - before_value
+    if drive_db <= 0:
+        raise CaptureError("clean loudness sweep declared drive change must be > 0 dB")
+    return {
+        "target": target,
+        "parameter": parameter,
+        "before": before_value,
+        "after": after_value,
+        "unit": "dB",
+        "drive_db": drive_db,
+    }
+
+
 def create_clean_loudness_journal_sweep(
     *,
     baseline_journal: str | Path,
     candidates: Iterable[tuple[float, str | Path]],
     analysis_label: str,
     tap_id: int,
+    drive_target: str,
+    drive_parameter: str,
     goal: CleanLoudnessGoal,
     policy: CleanLoudnessSweepPolicy,
     output_path: str | Path,
@@ -628,6 +677,20 @@ def create_clean_loudness_journal_sweep(
             raise CaptureError("clean loudness sweep candidate drive must be finite and > 0 dB")
         candidate = verify_experiment_journal(candidate_path)
         _validate_sweep_journal_family(baseline, candidate)
+        declared_change = _declared_drive_change(
+            candidate,
+            target=drive_target,
+            parameter=drive_parameter,
+        )
+        if not math.isclose(
+            drive,
+            float(declared_change["drive_db"]),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise CaptureError(
+                "clean loudness sweep drive label does not match declared experiment change"
+            )
         candidate_report = _bound_analysis_report(
             candidate_path, candidate, label=analysis_label, tap_id=tap_id
         )
@@ -636,6 +699,10 @@ def create_clean_loudness_journal_sweep(
         candidate_bindings.append(
             {
                 "drive_db": drive,
+                "declared_change": {
+                    key: declared_change[key]
+                    for key in ("target", "parameter", "before", "after", "unit")
+                },
                 "journal_path": _relative_reference(
                     candidate_path.resolve(), output.parent.resolve()
                 ),
@@ -665,6 +732,11 @@ def create_clean_loudness_journal_sweep(
         "comparison_id": str(baseline.get("comparison_id") or ""),
         "analysis_label": _safe_id(analysis_label),
         "tap_id": tap_id,
+        "drive_change": {
+            "target": drive_target,
+            "parameter": drive_parameter,
+            "unit": "dB",
+        },
         "goal": goal.as_dict(),
         "policy": policy.as_dict(),
         "baseline": {
@@ -701,6 +773,17 @@ def verify_clean_loudness_journal_sweep(path: str | Path) -> dict[str, Any]:
         raise CaptureError("clean loudness journal sweep identity is incomplete")
     if isinstance(tap_id, bool) or not isinstance(tap_id, int):
         raise CaptureError("clean loudness journal sweep tap_id must be an integer")
+    drive_change = payload.get("drive_change")
+    if not isinstance(drive_change, dict):
+        raise CaptureError("clean loudness journal sweep drive_change is invalid")
+    drive_target = str(drive_change.get("target") or "")
+    drive_parameter = str(drive_change.get("parameter") or "")
+    if (
+        not drive_target
+        or not drive_parameter
+        or str(drive_change.get("unit") or "").lower() != "db"
+    ):
+        raise CaptureError("clean loudness journal sweep drive_change is incomplete")
 
     goal_data = payload.get("goal")
     policy_data = payload.get("policy")
@@ -763,6 +846,28 @@ def verify_clean_loudness_journal_sweep(path: str | Path) -> dict[str, Any]:
         candidate_path = _resolve_reference(journal_ref, sweep_path.parent)
         candidate = verify_experiment_journal(candidate_path)
         _validate_sweep_journal_family(baseline, candidate)
+        declared_change = _declared_drive_change(
+            candidate,
+            target=drive_target,
+            parameter=drive_parameter,
+        )
+        if not math.isclose(
+            drive,
+            float(declared_change["drive_db"]),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise CaptureError(
+                "clean loudness sweep drive label does not match declared experiment change"
+            )
+        expected_declared_change = {
+            key: declared_change[key]
+            for key in ("target", "parameter", "before", "after", "unit")
+        }
+        if binding.get("declared_change") != expected_declared_change:
+            raise CaptureError(
+                "clean loudness sweep candidate declared change no longer matches journal"
+            )
         candidate_report = _bound_analysis_report(
             candidate_path, candidate, label=analysis_label, tap_id=tap_id
         )
