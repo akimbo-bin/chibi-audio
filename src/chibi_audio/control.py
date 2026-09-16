@@ -86,8 +86,9 @@ def build_audition_plan(
 
 def parameter_snapshot(
     *,
-    track_index: int,
+    track_index: int | None,
     track_name: str,
+    placement: str = "track",
     device_index: int,
     device_name: str,
     device_id: int | None,
@@ -107,9 +108,19 @@ def parameter_snapshot(
                 "display": parameter.get("display", parameter.get("display_value")),
             }
         )
+    if placement not in {"track", "master"}:
+        raise ControlPlanError("placement must be track or master")
+    if placement == "track" and track_index is None:
+        raise ControlPlanError("track placement requires track_index")
+    if placement == "master" and track_index is not None:
+        raise ControlPlanError("track_index must be omitted for placement=master")
     return {
         "set_signature": set_signature,
-        "track": {"index": int(track_index), "name": track_name},
+        "track": {
+            "placement": placement,
+            "index": int(track_index) if track_index is not None else None,
+            "name": track_name,
+        },
         "device": {"index": int(device_index), "name": device_name, "id": device_id},
         "parameters": items,
     }

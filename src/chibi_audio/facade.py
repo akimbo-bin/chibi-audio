@@ -26,6 +26,14 @@ _TRACK_IDENTITY_PROPERTIES = {
     "expected_set_signature": {"type": "string", "minLength": 1},
 }
 
+_DEVICE_TARGET_PROPERTIES = {
+    "placement": {"enum": ["track", "master"], "default": "track"},
+    "track_index": {"type": "integer", "minimum": 0},
+    "expected_track_name": {"type": "string", "minLength": 1},
+    "expected_track_id": {"type": "integer"},
+    "expected_set_signature": {"type": "string", "minLength": 1},
+}
+
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "status": {
         "description": "Read Chibi Audio bridge health and explicit capability classes.",
@@ -86,8 +94,9 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "description": "Capture a compact exact device-parameter snapshot for experiment provenance.",
         "inputSchema": {
             "type": "object",
-            "required": ["track_index", "track_name", "device_index", "device_name", "device_id"],
+            "required": ["track_name", "device_index", "device_name", "device_id"],
             "properties": {
+                "placement": {"enum": ["track", "master"], "default": "track"},
                 "track_index": {"type": "integer", "minimum": 0},
                 "track_name": {"type": "string", "minLength": 1},
                 "device_index": {"type": "integer", "minimum": 0},
@@ -180,7 +189,6 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "inputSchema": {
             "type": "object",
             "required": [
-                "track_index",
                 "expected_track_name",
                 "device_index",
                 "expected_device_name",
@@ -190,7 +198,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "value",
             ],
             "properties": {
-                **_TRACK_IDENTITY_PROPERTIES,
+                **_DEVICE_TARGET_PROPERTIES,
                 "device_index": {"type": "integer", "minimum": 0},
                 "expected_device_name": {"type": "string", "minLength": 1},
                 "expected_device_id": {"type": "integer"},
@@ -210,7 +218,6 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": [
                 "enabled",
-                "track_index",
                 "expected_track_name",
                 "device_index",
                 "expected_device_name",
@@ -219,7 +226,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "expected_current_value",
             ],
             "properties": {
-                **_TRACK_IDENTITY_PROPERTIES,
+                **_DEVICE_TARGET_PROPERTIES,
                 "enabled": {"type": "boolean"},
                 "device_index": {"type": "integer", "minimum": 0},
                 "expected_device_name": {"type": "string", "minLength": 1},
@@ -339,8 +346,9 @@ class ChibiAudioFacade:
         else:
             raise FacadeError("device_parameters returned an unsupported payload")
         return parameter_snapshot(
-            track_index=int(args["track_index"]),
+            track_index=int(args["track_index"]) if args.get("track_index") is not None else None,
             track_name=str(args["track_name"]),
+            placement=str(args.get("placement", "track")),
             device_index=int(args["device_index"]),
             device_name=str(args["device_name"]),
             device_id=int(args["device_id"]),

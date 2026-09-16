@@ -150,3 +150,22 @@ def test_track_mixer_state_avoids_optional_live_display_value_property():
     get_calls = [params for method, params in facade.read.calls if method == "get"]
     assert len(get_calls) == 2
     assert all(params["properties"] == ["name", "value", "min", "max"] for params in get_calls)
+
+
+def test_master_parameter_snapshot_routes_without_track_index():
+    facade = make_facade()
+    result = facade.call(
+        "parameter_snapshot",
+        {
+            "placement": "master",
+            "track_name": "Main",
+            "device_index": 6,
+            "device_name": "Pro-L 2",
+            "device_id": 777,
+            "set_signature": "sig-master",
+        },
+    )
+    assert result["track"] == {"placement": "master", "index": None, "name": "Main"}
+    schema = TOOL_SCHEMAS["set_device_parameter"]["inputSchema"]
+    assert "track_index" not in schema["required"]
+    assert schema["properties"]["placement"]["enum"] == ["track", "master"]

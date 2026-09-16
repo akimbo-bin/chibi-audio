@@ -93,3 +93,29 @@ def test_parameter_diff_refuses_different_device_identity():
     )
     with pytest.raises(ControlPlanError, match="different track/device"):
         diff_parameter_snapshots(before, after)
+
+
+def test_parameter_snapshot_supports_master_target_without_track_index():
+    snapshot = parameter_snapshot(
+        placement="master",
+        track_index=None,
+        track_name="Main",
+        device_index=6,
+        device_name="Pro-L 2",
+        device_id=222,
+        parameters=[{"id": 333, "name": "Gain", "value": 0.41, "display": "+12.4 dB"}],
+        set_signature="sig-master",
+    )
+    assert snapshot["track"] == {"placement": "master", "index": None, "name": "Main"}
+    assert snapshot["device"]["name"] == "Pro-L 2"
+
+    with pytest.raises(ControlPlanError, match="omitted"):
+        parameter_snapshot(
+            placement="master",
+            track_index=0,
+            track_name="Main",
+            device_index=6,
+            device_name="Pro-L 2",
+            device_id=222,
+            parameters=[],
+        )

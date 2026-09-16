@@ -457,11 +457,41 @@ class LivePilotWriteClient(_LiveTransport):
         )
         return self._request("track_set", params)
 
+    def _device_target_identity(
+        self,
+        *,
+        placement: str,
+        track_index: int | None,
+        expected_track_name: str,
+        expected_track_id: int | None = None,
+        expected_set_signature: str | None = None,
+    ) -> dict[str, Any]:
+        if placement not in {"track", "master"}:
+            raise LiveBridgeError("placement must be track or master")
+        if not expected_track_name:
+            raise LiveBridgeError("expected_track_name is required")
+        params: dict[str, Any] = {
+            "placement": placement,
+            "expected_track_name": expected_track_name,
+        }
+        if placement == "track":
+            if track_index is None or track_index < 0:
+                raise LiveBridgeError("track placement requires track_index >= 0")
+            params["track_index"] = int(track_index)
+        elif track_index is not None:
+            raise LiveBridgeError("track_index must be omitted for placement=master")
+        if expected_track_id is not None:
+            params["expected_track_id"] = int(expected_track_id)
+        if expected_set_signature:
+            params["expected_set_signature"] = expected_set_signature
+        return params
+
     def set_device_parameter(
         self,
         *,
-        track_index: int,
         expected_track_name: str,
+        track_index: int | None = None,
+        placement: str = "track",
         device_index: int,
         expected_device_name: str,
         parameter_index: int,
@@ -481,7 +511,8 @@ class LivePilotWriteClient(_LiveTransport):
             raise LiveBridgeError("expected device and parameter names are required")
         if verify_capability:
             self._require_method("bounded_write", "device_parameter_set")
-        params = self._track_identity(
+        params = self._device_target_identity(
+            placement=placement,
             track_index=track_index,
             expected_track_name=expected_track_name,
             expected_track_id=expected_track_id,
@@ -508,8 +539,9 @@ class LivePilotWriteClient(_LiveTransport):
         self,
         enabled: bool,
         *,
-        track_index: int,
         expected_track_name: str,
+        track_index: int | None = None,
+        placement: str = "track",
         device_index: int,
         expected_device_name: str,
         parameter_index: int,
@@ -525,7 +557,8 @@ class LivePilotWriteClient(_LiveTransport):
             raise LiveBridgeError("enabled must be a boolean")
         if verify_capability:
             self._require_method("bounded_write", "device_enabled_set")
-        params = self._track_identity(
+        params = self._device_target_identity(
+            placement=placement,
             track_index=track_index,
             expected_track_name=expected_track_name,
             expected_track_id=expected_track_id,

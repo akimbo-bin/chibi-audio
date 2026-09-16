@@ -154,6 +154,44 @@ def test_typed_device_parameter_request_carries_exact_ids():
     assert params["expected_set_signature"] == "sig-param"
 
 
+def test_typed_master_device_parameter_request_omits_track_index():
+    client = FakeWriteClient()
+    result = client.set_device_parameter(
+        placement="master",
+        expected_track_name="Main",
+        expected_track_id=1700,
+        device_index=6,
+        expected_device_name="Pro-L 2",
+        expected_device_id=2600,
+        parameter_index=4,
+        expected_parameter_name="Gain",
+        expected_parameter_id=4600,
+        expected_current_value=0.41,
+        value=0.42,
+        expected_set_signature="sig-master",
+    )
+    assert result["method"] == "device_parameter_set"
+    params = client.calls[-1][1]
+    assert params["placement"] == "master"
+    assert "track_index" not in params
+    assert params["expected_track_name"] == "Main"
+    assert params["expected_track_id"] == 1700
+    assert params["expected_set_signature"] == "sig-master"
+
+    with pytest.raises(LiveBridgeError, match="track_index must be omitted"):
+        client.set_device_parameter(
+            placement="master",
+            track_index=0,
+            expected_track_name="Main",
+            device_index=6,
+            expected_device_name="Pro-L 2",
+            parameter_index=4,
+            expected_parameter_name="Gain",
+            expected_current_value=0.41,
+            value=0.42,
+        )
+
+
 def test_device_enabled_requires_boolean():
     client = FakeWriteClient()
     with pytest.raises(LiveBridgeError, match="enabled must be a boolean"):

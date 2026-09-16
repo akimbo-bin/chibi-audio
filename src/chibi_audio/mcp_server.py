@@ -4,7 +4,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -21,6 +21,7 @@ SetSignature = Annotated[str, Field(min_length=1, max_length=2_000)]
 RawParameterValue = Annotated[float, Field(allow_inf_nan=False)]
 ArtifactPath = Annotated[str, Field(min_length=1, max_length=2_000)]
 TrackIndexList = Annotated[list[TrackIndex], Field(max_length=1_000)]
+DevicePlacement = Literal["track", "master"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,23 +199,26 @@ def build_mcp_server(
         structured_output=True,
     )
     def parameter_snapshot(
-        track_index: TrackIndex,
         track_name: ObjectName,
         device_index: TrackIndex,
         device_name: ObjectName,
         device_id: ObjectId,
+        track_index: TrackIndex | None = None,
+        placement: DevicePlacement = "track",
         set_signature: SetSignature | None = None,
         limit: Annotated[int, Field(ge=1, le=4_096, strict=True)] = 256,
     ) -> dict[str, Any]:
         try:
             args: dict[str, Any] = {
-                "track_index": track_index,
+                "placement": placement,
                 "track_name": track_name,
                 "device_index": device_index,
                 "device_name": device_name,
                 "device_id": device_id,
                 "limit": limit,
             }
+            if track_index is not None:
+                args["track_index"] = track_index
             if set_signature is not None:
                 args["set_signature"] = set_signature
             return surface.call("parameter_snapshot", args)
@@ -462,7 +466,6 @@ def build_mcp_server(
             structured_output=True,
         )
         def set_device_parameter(
-            track_index: TrackIndex,
             expected_track_name: ObjectName,
             device_index: TrackIndex,
             expected_device_name: ObjectName,
@@ -470,6 +473,8 @@ def build_mcp_server(
             expected_parameter_name: ObjectName,
             expected_current_value: RawParameterValue,
             value: RawParameterValue,
+            track_index: TrackIndex | None = None,
+            placement: DevicePlacement = "track",
             expected_track_id: ObjectId | None = None,
             expected_device_id: ObjectId | None = None,
             expected_parameter_id: ObjectId | None = None,
@@ -478,7 +483,7 @@ def build_mcp_server(
         ) -> dict[str, Any]:
             try:
                 args: dict[str, Any] = {
-                    "track_index": track_index,
+                    "placement": placement,
                     "expected_track_name": expected_track_name,
                     "device_index": device_index,
                     "expected_device_name": expected_device_name,
@@ -488,6 +493,8 @@ def build_mcp_server(
                     "value": value,
                     "coerce": coerce,
                 }
+                if track_index is not None:
+                    args["track_index"] = track_index
                 for key, item in (
                     ("expected_track_id", expected_track_id),
                     ("expected_device_id", expected_device_id),
@@ -511,13 +518,14 @@ def build_mcp_server(
         )
         def set_device_enabled(
             enabled: bool,
-            track_index: TrackIndex,
             expected_track_name: ObjectName,
             device_index: TrackIndex,
             expected_device_name: ObjectName,
             parameter_index: TrackIndex,
             expected_parameter_name: ObjectName,
             expected_current_value: RawParameterValue,
+            track_index: TrackIndex | None = None,
+            placement: DevicePlacement = "track",
             expected_track_id: ObjectId | None = None,
             expected_device_id: ObjectId | None = None,
             expected_parameter_id: ObjectId | None = None,
@@ -526,7 +534,7 @@ def build_mcp_server(
             try:
                 args: dict[str, Any] = {
                     "enabled": enabled,
-                    "track_index": track_index,
+                    "placement": placement,
                     "expected_track_name": expected_track_name,
                     "device_index": device_index,
                     "expected_device_name": expected_device_name,
@@ -534,6 +542,8 @@ def build_mcp_server(
                     "expected_parameter_name": expected_parameter_name,
                     "expected_current_value": expected_current_value,
                 }
+                if track_index is not None:
+                    args["track_index"] = track_index
                 for key, item in (
                     ("expected_track_id", expected_track_id),
                     ("expected_device_id", expected_device_id),

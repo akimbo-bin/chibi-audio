@@ -27,6 +27,36 @@ def _track(self, params):
     return index, track, track_id
 
 
+def _device_target(self, params):
+    placement = params.get("placement", "track")
+    if placement == "track":
+        index, track, track_id = _track(self, params)
+        return {
+            "placement": "track",
+            "index": index,
+            "id": track_id,
+            "name": getattr(track, "name", ""),
+        }, track
+    if placement != "master":
+        raise ValueError("placement must be track or master")
+    if params.get("track_index") is not None:
+        raise ValueError("track_index must be omitted for placement=master")
+    track = self.song().master_track
+    expected_name = params.get("expected_track_name")
+    if not expected_name or getattr(track, "name", "") != expected_name:
+        raise RuntimeError("Track identity mismatch for bounded write")
+    track_id = self._object_id(track)
+    expected_id = params.get("expected_track_id")
+    if expected_id is not None and int(expected_id) != track_id:
+        raise RuntimeError("Track object identity changed since inspection; refusing write")
+    return {
+        "placement": "master",
+        "index": None,
+        "id": track_id,
+        "name": getattr(track, "name", ""),
+    }, track
+
+
 def _device(self, track, params):
     index = params.get("device_index")
     if index is None:
@@ -150,11 +180,11 @@ def rpc_track_set(self, params):
 
 
 def rpc_device_parameter_set(self, params):
-    track_index, track, track_id = _track(self, params)
+    track_summary, track = _device_target(self, params)
     device_index, device, device_id = _device(self, track, params)
     parameter_index, parameter, parameter_id = _parameter(self, device, params)
     result = _write_parameter(self, parameter, params)
-    result["track"] = {"index": track_index, "id": track_id, "name": getattr(track, "name", "")}
+    result["track"] = track_summary
     result["device"] = {"index": device_index, "id": device_id, "name": getattr(device, "name", "")}
     result["parameter_index"] = parameter_index
     result["parameter_id"] = parameter_id

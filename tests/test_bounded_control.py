@@ -53,6 +53,8 @@ class Track:
 class Song:
     def __init__(self):
         self.tracks = [Track()]
+        self.master_track = Track()
+        self.master_track.name = "Main"
 
 
 class FakeBridge:
@@ -164,6 +166,72 @@ def test_device_parameter_write_refuses_stale_parameter_id():
                 "parameter_index": 1,
                 "expected_parameter_name": "Depth",
                 "expected_parameter_id": 123,
+                "expected_current_value": 0.25,
+                "value": 0.30,
+            },
+        )
+
+
+def test_device_parameter_write_supports_exact_master_identity():
+    bridge = FakeBridge()
+    master = bridge.song().master_track
+    device = master.devices[0]
+    parameter = device.parameters[1]
+    result = bounded_control.rpc_device_parameter_set(
+        bridge,
+        {
+            "placement": "master",
+            "expected_track_name": "Main",
+            "expected_track_id": id(master),
+            "device_index": 0,
+            "expected_device_name": "soothe2",
+            "expected_device_id": id(device),
+            "parameter_index": 1,
+            "expected_parameter_name": "Depth",
+            "expected_parameter_id": id(parameter),
+            "expected_current_value": 0.25,
+            "value": 0.30,
+        },
+    )
+    assert result["track"] == {
+        "placement": "master",
+        "index": None,
+        "id": id(master),
+        "name": "Main",
+    }
+    assert result["applied_value"] == 0.30
+    assert result["read_back_verified"] is True
+
+
+def test_master_device_write_refuses_track_index_and_stale_identity():
+    bridge = FakeBridge()
+    master = bridge.song().master_track
+    with pytest.raises(ValueError, match="track_index must be omitted"):
+        bounded_control.rpc_device_parameter_set(
+            bridge,
+            {
+                "placement": "master",
+                "track_index": 0,
+                "expected_track_name": "Main",
+                "device_index": 0,
+                "expected_device_name": "soothe2",
+                "parameter_index": 1,
+                "expected_parameter_name": "Depth",
+                "expected_current_value": 0.25,
+                "value": 0.30,
+            },
+        )
+    with pytest.raises(RuntimeError, match="Track object identity changed"):
+        bounded_control.rpc_device_parameter_set(
+            bridge,
+            {
+                "placement": "master",
+                "expected_track_name": "Main",
+                "expected_track_id": id(master) + 1,
+                "device_index": 0,
+                "expected_device_name": "soothe2",
+                "parameter_index": 1,
+                "expected_parameter_name": "Depth",
                 "expected_current_value": 0.25,
                 "value": 0.30,
             },
