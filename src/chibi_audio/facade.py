@@ -13,6 +13,7 @@ from .control import (
 )
 from .harshness import analyze_harshness
 from .live import LiveBridgeClient, LivePilotWriteClient
+from .sidechain_verify import verify_sidechain_capture
 
 
 class FacadeError(RuntimeError):
@@ -63,6 +64,28 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "max_depth": {"type": "integer", "minimum": 0, "maximum": 32},
                 "include_return_tracks": {"type": "boolean"},
                 "include_master_track": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "verify_sidechain_capture": {
+        "description": (
+            "Measure rendered event-correlated ducking from aligned trigger, target-pre and target-post ChibiTap evidence. "
+            "This is analysis-only and does not trust plugin gain-reduction meters."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["manifest", "trigger_label", "target_pre_label", "target_post_label"],
+            "properties": {
+                "manifest": {"type": "string", "minLength": 1},
+                "trigger_label": {"type": "string", "minLength": 1},
+                "target_pre_label": {"type": "string", "minLength": 1},
+                "target_post_label": {"type": "string", "minLength": 1},
+                "trigger_threshold_dbfs": {"type": "number", "minimum": -160, "maximum": 0},
+                "min_event_gap_ms": {"type": "number", "exclusiveMinimum": 0},
+                "target_active_floor_dbfs": {"type": "number", "minimum": -160, "maximum": 0},
+                "target_activity_margin_db": {"type": "number", "exclusiveMinimum": 0},
+                "depth_threshold_db": {"type": "number", "exclusiveMinimum": 0},
             },
             "additionalProperties": False,
         },
@@ -310,6 +333,7 @@ class ChibiAudioFacade:
                     "include_master_track": bool(a.get("include_master_track", True)),
                 },
             ),
+            "verify_sidechain_capture": self._verify_sidechain_capture,
             "device_parameters": lambda a: self.read.call(
                 "device_parameters",
                 {"ref": {"id": int(a["device_id"])}, "limit": int(a.get("limit", 256))},
@@ -335,6 +359,23 @@ class ChibiAudioFacade:
         if name not in handlers:
             raise KeyError(f"Unknown Chibi Audio facade tool: {name}")
         return handlers[name](args)
+
+    def _verify_sidechain_capture(self, args: dict[str, Any]) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "trigger_label": str(args["trigger_label"]),
+            "target_pre_label": str(args["target_pre_label"]),
+            "target_post_label": str(args["target_post_label"]),
+        }
+        for key in (
+            "trigger_threshold_dbfs",
+            "min_event_gap_ms",
+            "target_active_floor_dbfs",
+            "target_activity_margin_db",
+            "depth_threshold_db",
+        ):
+            if key in args:
+                kwargs[key] = float(args[key])
+        return verify_sidechain_capture(self._resolve_artifact(str(args["manifest"])), **kwargs)
 
     def _track_mixer_state(self, args: dict[str, Any]) -> dict[str, Any]:
         index = int(args["track_index"])

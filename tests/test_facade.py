@@ -202,3 +202,35 @@ def test_sidechain_audit_is_explicit_read_only_facade_call():
             "include_master_track": True,
         },
     )
+
+
+def test_sidechain_capture_verifier_is_artifact_confined_and_analysis_only(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    manifest = root / "capture-manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    observed = {}
+
+    def fake_verify(path, **kwargs):
+        observed["path"] = path
+        observed["kwargs"] = kwargs
+        return {"effect_state": "NOT_STARTED", "status": "MEASURED"}
+
+    monkeypatch.setattr("chibi_audio.facade.verify_sidechain_capture", fake_verify)
+    facade = make_facade(root)
+    result = facade.call(
+        "verify_sidechain_capture",
+        {
+            "manifest": "capture-manifest.json",
+            "trigger_label": "TRIGGER",
+            "target_pre_label": "BASS_PRE",
+            "target_post_label": "BASS_POST",
+            "trigger_threshold_dbfs": -24.0,
+        },
+    )
+    assert result == {"effect_state": "NOT_STARTED", "status": "MEASURED"}
+    assert observed["path"] == manifest.resolve()
+    assert observed["kwargs"]["trigger_label"] == "TRIGGER"
+    assert observed["kwargs"]["trigger_threshold_dbfs"] == -24.0
+    assert "verify_sidechain_capture" in facade.tool_names()
+    assert facade.write.calls == []
