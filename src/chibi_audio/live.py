@@ -242,6 +242,8 @@ class LiveCaptureClient(_LiveTransport):
             raise LiveBridgeError("configure_chibitap requires tap_id and/or capture_enabled")
         if tap_id is not None and expected_tap_id is None:
             raise LiveBridgeError("expected_tap_id is required when changing tap_id")
+        if tap_id is not None and expected_capture_enabled is not False:
+            raise LiveBridgeError("expected_capture_enabled=False is required when changing tap_id")
         if capture_enabled is not None and expected_capture_enabled is None:
             raise LiveBridgeError("expected_capture_enabled is required when changing capture_enabled")
         if verify_capability:
@@ -258,6 +260,10 @@ class LiveCaptureClient(_LiveTransport):
             if type(capture_enabled) is not bool or type(expected_capture_enabled) is not bool:
                 raise LiveBridgeError("capture_enabled and expected_capture_enabled must be booleans")
             params["capture_enabled"] = capture_enabled
+            params["expected_capture_enabled"] = expected_capture_enabled
+        elif expected_capture_enabled is not None:
+            if type(expected_capture_enabled) is not bool:
+                raise LiveBridgeError("expected_capture_enabled must be a boolean")
             params["expected_capture_enabled"] = expected_capture_enabled
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature

@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 
 import pytest
@@ -31,6 +31,8 @@ class FakeReadClient:
                 "devices": [{"id": 101, "name": "ChibiTap"}],
             },
         }
+        self.device_types = {101: 2, 201: 2, 203: 2}
+        self.tap_ids = {101: 1, 201: 2, 203: 3}
 
     def set_summary(self, **_kwargs):
         return self.summary
@@ -38,12 +40,19 @@ class FakeReadClient:
     def call(self, method, params):
         if method == "device_parameters":
             device_id = int(params["ref"]["id"])
-            tap_id = 1 if device_id == 101 else 2
+            tap_id = self.tap_ids[device_id]
             return [
                 {"name": "Capture", "value": 0.0, "display": "Off"},
                 {"name": "Tap ID", "value": tap_id / 9999.0, "display": str(tap_id)},
             ]
         if method == "get":
+            ref = params.get("ref") or {}
+            if ref.get("id") is not None:
+                device_id = int(ref["id"])
+                return {
+                    "id": device_id,
+                    "properties": {"type": self.device_types[device_id]},
+                }
             return {
                 "properties": {
                     "name": "Test Set",
@@ -72,6 +81,7 @@ class StaleCaptureReadClient(FakeReadClient):
 
 class FakeCaptureClient:
     instances = []
+    device_indices = {101: 0, 201: 0, 203: 2}
 
     def __init__(self, **_kwargs):
         self.calls = []
@@ -107,12 +117,28 @@ class FakeCaptureClient:
 
     def configure_chibitap(self, **kwargs):
         self.calls.append(("configure", kwargs))
-        return {"changed": True}
+        device_id = kwargs["expected_device_id"]
+        return {
+            "changed": True,
+            "signal_point": kwargs["signal_point"],
+            "device_index": self.device_indices[device_id],
+            "device": {"id": device_id, "name": "ChibiTap"},
+        }
 
 
 def test_parse_and_resolve_session_taps():
     spec = parse_session_tap("2:BASS:BASS")
     assert spec == CaptureSessionTap(2, "BASS", "BASS")
+    assert spec.signal_point == "post_fx"
+
+    pre = parse_session_tap("2:BASS_PRE:pre_fx:BUS:BASS")
+    assert pre == CaptureSessionTap(2, "BASS_PRE", "BUS:BASS", "pre_fx")
+
+    legacy_colon = parse_session_tap("2:BASS:BUS:BASS")
+    assert legacy_colon == CaptureSessionTap(2, "BASS", "BUS:BASS", "post_fx")
+
+    with pytest.raises(CaptureError, match="signal_point"):
+        CaptureSessionTap(2, "BASS", "BASS", "middle")
 
     reader = FakeReadClient()
     resolved = resolve_session_taps(
@@ -125,6 +151,8 @@ def test_parse_and_resolve_session_taps():
         (2, "BASS", 201),
     ]
     assert resolved[0].placement == "master"
+    assert resolved[0].signal_point == "post_fx"
+    assert resolved[0].device_index == 0
     assert resolved[1].track_index == 34
 
     with pytest.raises(CaptureError, match="duplicate tap_id"):
@@ -132,6 +160,100 @@ def test_parse_and_resolve_session_taps():
             reader,
             reader.summary,
             [CaptureSessionTap(1, "Main", "master"), CaptureSessionTap(1, "Bass", "BASS")],
+        )
+
+
+def test_resolve_session_taps_verifies_pre_fx_and_post_instrument_signal_points():
+    reader = FakeReadClient()
+    track = reader.summary["tracks"][0]
+
+    track["devices"] = [
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+    ]
+    reader.device_types[202] = 2
+    pre_fx = resolve_session_taps(
+        reader,
+        reader.summary,
+        [CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx")],
+    )[0]
+    assert pre_fx.signal_point == "pre_fx"
+    assert pre_fx.device_index == 0
+    assert pre_fx.configure_kwargs()["signal_point"] == "pre_fx"
+
+    track["devices"] = [
+        {"id": 301, "name": "Serum"},
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+    ]
+    reader.device_types[301] = 1
+    post_instrument = resolve_session_taps(
+        reader,
+        reader.summary,
+        [CaptureSessionTap(2, "BASS_INST", "BASS", "post_instrument")],
+    )[0]
+    assert post_instrument.signal_point == "post_instrument"
+    assert post_instrument.device_index == 1
+
+
+def test_resolve_session_taps_selects_multiple_same_track_instances():
+    reader = FakeReadClient()
+    reader.summary["tracks"][0]["devices"] = [
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+        {"id": 203, "name": "ChibiTap"},
+    ]
+    reader.device_types[202] = 2
+
+    resolved = resolve_session_taps(
+        reader,
+        reader.summary,
+        [
+            CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx"),
+            CaptureSessionTap(3, "BASS_POST", "BASS", "post_fx"),
+        ],
+    )
+
+    assert [(tap.tap_id, tap.device_id, tap.device_index, tap.signal_point) for tap in resolved] == [
+        (2, 201, 0, "pre_fx"),
+        (3, 203, 2, "post_fx"),
+    ]
+
+
+def test_resolve_session_taps_refuses_missing_signal_point_before_capture():
+    reader = FakeReadClient()
+    reader.summary["tracks"][0]["devices"] = [
+        {"id": 202, "name": "Compressor"},
+        {"id": 201, "name": "ChibiTap"},
+    ]
+    reader.device_types[202] = 2
+
+    with pytest.raises(CaptureError, match="is not installed at pre_fx"):
+        resolve_session_taps(
+            reader,
+            reader.summary,
+            [CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx")],
+        )
+
+
+def test_resolve_session_taps_refuses_equivalent_points_reusing_same_device():
+    reader = FakeReadClient()
+    reader.summary["tracks"][0]["devices"] = [
+        {"id": 301, "name": "Serum"},
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+    ]
+    reader.device_types[301] = 1
+    reader.device_types[202] = 2
+
+    with pytest.raises(CaptureError, match="same ChibiTap device"):
+        resolve_session_taps(
+            reader,
+            reader.summary,
+            [
+                CaptureSessionTap(2, "BASS_INST", "BASS", "post_instrument"),
+                CaptureSessionTap(3, "BASS_PRE", "BASS", "pre_fx"),
+            ],
         )
 
 
@@ -149,11 +271,17 @@ def test_resolve_session_taps_rechecks_transient_stale_capture_state(monkeypatch
     assert reader.main_capture_reads == 2
 
 
-def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp_path):
+def test_run_capture_session_coordinates_same_track_pre_post_and_records_provenance(monkeypatch, tmp_path):
     import chibi_audio.capture_session as session
 
     FakeCaptureClient.instances.clear()
     reader = FakeReadClient()
+    reader.summary["tracks"][0]["devices"] = [
+        {"id": 201, "name": "ChibiTap"},
+        {"id": 202, "name": "Compressor"},
+        {"id": 203, "name": "ChibiTap"},
+    ]
+    reader.device_types[202] = 2
     reader.summary["tracks"][0]["mute"] = False
     reader.summary["tracks"][0]["solo"] = False
     reader.summary["tracks"].append(
@@ -172,7 +300,8 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
 
     raw_paths = {
         1: tmp_path / "raw-main.wav",
-        2: tmp_path / "raw-bass.wav",
+        2: tmp_path / "raw-bass-pre.wav",
+        3: tmp_path / "raw-bass-post.wav",
     }
     for path in raw_paths.values():
         path.write_bytes(b"raw")
@@ -201,7 +330,11 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
 
     manifest_path = run_capture_session(
         experiment_id="proof",
-        taps=[CaptureSessionTap(1, "Main", "master"), CaptureSessionTap(2, "BASS", "BASS")],
+        taps=[
+            CaptureSessionTap(1, "Main", "master"),
+            CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx"),
+            CaptureSessionTap(3, "BASS_POST", "BASS", "post_fx"),
+        ],
         output_dir=tmp_path / "final",
         start_beat=0.0,
         end_beat=1.0,
@@ -214,25 +347,57 @@ def test_run_capture_session_coordinates_and_records_provenance(monkeypatch, tmp
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["live_session"]["set_signature"] == "sig-1"
-    assert [item["tap_id"] for item in manifest["live_session"]["tap_mapping"]] == [1, 2]
+    tap_mapping = manifest["live_session"]["tap_mapping"]
+    assert [item["tap_id"] for item in tap_mapping] == [1, 2, 3]
+    assert [item["device_id"] for item in tap_mapping] == [101, 201, 203]
+    assert [item["signal_point"] for item in tap_mapping] == ["post_fx", "pre_fx", "post_fx"]
+    assert [item["device_index"] for item in tap_mapping] == [0, 0, 2]
+    assert [item["arm_verification"]["device_index"] for item in tap_mapping] == [0, 0, 2]
+    assert [item["arm_verification"]["signal_point"] for item in tap_mapping] == [
+        "post_fx",
+        "pre_fx",
+        "post_fx",
+    ]
     assert manifest["live_session"]["song"]["file_path"] == "C:/test/Test Set.als"
     mixer_state = manifest["live_session"]["mixer_state"]
     assert [item["name"] for item in mixer_state["active_solos"]] == ["52-Serum 2"]
     assert mixer_state["active_solo_count"] == 1
     assert mixer_state["tap_targets"][0]["solo_suppression_risk"] is False
     assert mixer_state["tap_targets"][1]["solo_suppression_risk"] is True
-    assert [item["track_name"] for item in mixer_state["tap_targets"]] == ["Main", "BASS"]
+    assert mixer_state["tap_targets"][2]["solo_suppression_risk"] is True
+    assert [item["track_name"] for item in mixer_state["tap_targets"]] == ["Main", "BASS", "BASS"]
+    assert [item["signal_point"] for item in mixer_state["tap_targets"]] == [
+        "post_fx",
+        "pre_fx",
+        "post_fx",
+    ]
     assert mixer_state["tap_targets"][1]["mute"] is False
     assert mixer_state["tap_targets"][1]["solo"] is False
     assert any("active solo" in warning.lower() for warning in mixer_state["warnings"])
     assert any("BASS" in warning and "suppressed" in warning for warning in mixer_state["warnings"])
     assert finalized["transport_start_beat"] == 0.0
     assert finalized["transport_stop_beat"] == 1.0
-    assert [item.tap_id for item in finalized["inputs"]] == [1, 2]
+    assert [item.tap_id for item in finalized["inputs"]] == [1, 2, 3]
 
     client = FakeCaptureClient.instances[-1]
     configure_calls = [call[1] for call in client.calls if call[0] == "configure"]
-    assert [call["capture_enabled"] for call in configure_calls] == [True, True, False, False]
+    assert [call["capture_enabled"] for call in configure_calls] == [
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+    ]
     assert all(call["expected_set_signature"] == "sig-1" for call in configure_calls)
+    assert [call["expected_device_id"] for call in configure_calls] == [101, 201, 203, 203, 201, 101]
+    assert [call["signal_point"] for call in configure_calls] == [
+        "post_fx",
+        "pre_fx",
+        "post_fx",
+        "post_fx",
+        "pre_fx",
+        "post_fx",
+    ]
     transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
     assert transport_actions == ["stop", "play_until", "status"]
