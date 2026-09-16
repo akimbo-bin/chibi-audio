@@ -391,22 +391,16 @@ def _wait_for_capture_quiescence(
 ) -> dict[int, tuple[Path, int]]:
     taps = list(resolved)
     deadline = time.monotonic() + timeout
-    last_total: int | None = None
+    last_snapshot: dict[int, tuple[Path, int]] | None = None
     last_change = time.monotonic()
-    growth_seen = False
     while time.monotonic() < deadline:
         snapshot = _new_capture_snapshot(root, taps, before)
-        if len(snapshot) == len(taps):
-            total = sum(size for _path, size in snapshot.values())
+        if len(snapshot) == len(taps) and all(size > 44 for _path, size in snapshot.values()):
             now = time.monotonic()
-            if last_total is None:
-                last_total = total
+            if last_snapshot != snapshot:
+                last_snapshot = snapshot
                 last_change = now
-            elif total != last_total:
-                growth_seen = growth_seen or total > last_total
-                last_total = total
-                last_change = now
-            elif growth_seen and now - last_change >= quiet_seconds:
+            elif now - last_change >= quiet_seconds:
                 return snapshot
         time.sleep(poll_interval)
     raise CaptureError("ChibiTap capture artifacts did not become quiescent before timeout")

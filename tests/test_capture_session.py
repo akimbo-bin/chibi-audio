@@ -429,3 +429,30 @@ def test_run_capture_session_coordinates_same_track_pre_post_and_records_provena
     ]
     transport_actions = [call[1] for call in client.calls if call[0] == "transport"]
     assert transport_actions == ["stop", "play_until", "status"]
+
+
+def test_wait_for_capture_quiescence_accepts_file_complete_before_first_poll(monkeypatch, tmp_path):
+    import chibi_audio.capture_session as session
+
+    tap = CaptureSessionTap(1, "Main", "master")
+    path = tmp_path / "chibitap-tap-1-short.wav"
+    clock = {"now": 0.0}
+    snapshot = {1: (path, 1024)}
+    monkeypatch.setattr(session, "_new_capture_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(session.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        session.time,
+        "sleep",
+        lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+    )
+
+    result = session._wait_for_capture_quiescence(
+        tmp_path,
+        [tap],
+        {1: set()},
+        timeout=1.0,
+        poll_interval=0.1,
+        quiet_seconds=0.3,
+    )
+
+    assert result == snapshot
