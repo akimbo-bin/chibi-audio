@@ -70,6 +70,14 @@ class DeviceInfo:
 
 
 @dataclass(slots=True)
+class ArrangementClipInfo:
+    type: str
+    start_beat: float
+    end_beat: float
+    disabled: bool
+
+
+@dataclass(slots=True)
 class TrackInfo:
     id: str | None
     type: str
@@ -77,6 +85,7 @@ class TrackInfo:
     color: int | str | None
     group_id: str | None
     devices: list[DeviceInfo]
+    arrangement_clips: list[ArrangementClipInfo]
 
 
 def parse_scalar(raw: str | None) -> int | str | None:
@@ -118,6 +127,30 @@ def inspect_set(path: str | Path) -> dict:
                     enabled = enabled_raw == "true"
                 devices.append(DeviceInfo(type=dtype, plugin=pname, enabled=enabled))
 
+        arrangement_clips: list[ArrangementClipInfo] = []
+        if device_chain is not None:
+            for arranger in descendants(device_chain, "ArrangerAutomation"):
+                events = direct_child(arranger, "Events")
+                if events is None:
+                    continue
+                for clip in list(events):
+                    clip_type = local_name(clip.tag)
+                    if clip_type not in {"AudioClip", "MidiClip"}:
+                        continue
+                    start_raw = value(direct_child(clip, "CurrentStart")) or clip.attrib.get("Time")
+                    end_raw = value(direct_child(clip, "CurrentEnd"))
+                    if start_raw is None or end_raw is None:
+                        continue
+                    try:
+                        start_beat = float(start_raw)
+                        end_beat = float(end_raw)
+                    except ValueError:
+                        continue
+                    if end_beat <= start_beat:
+                        continue
+                    disabled = value(direct_child(clip, "Disabled")) == "true"
+                    arrangement_clips.append(ArrangementClipInfo(clip_type, start_beat, end_beat, disabled))
+
         tracks.append(
             TrackInfo(
                 id=node.attrib.get("Id"),
@@ -126,6 +159,7 @@ def inspect_set(path: str | Path) -> dict:
                 color=parse_scalar(value(direct_child(node, "Color"))),
                 group_id=value(direct_child(node, "TrackGroupId")),
                 devices=devices,
+                arrangement_clips=arrangement_clips,
             )
         )
 

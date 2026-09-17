@@ -37,6 +37,14 @@ An iterative optimization mode may decide that one measured candidate is better 
 
 ## Interaction model
 
+### Workflow planes and durable commands
+
+Chibi Audio exposes four repeatable workflow intents: `organize`, `mix`, `sidechain`, and `master`. They share one stable contract across CLI, MCP/ChatGPT, and Chibi Core; the caller is an invocation surface, while Chibi Core is the durable workflow authority for resumable multi-wave work.
+
+`organize` is normally the first plane when project context is missing or stale. It dissects the Set, applies or proposes presentation/structure changes according to `PROJECT_ORGANIZATION.md`, and persists a project knowledge graph that later workers reuse. `mix` consumes that context and may invoke `sidechain` and `master` as specialist child workflows. `sidechain` and `master` may also be called directly. See `docs/workflow-commands.md` and issue #27.
+
+A request such as "take control of Ableton and work on the mix for hours" should create or resume a Core-owned workflow with checkpoints, budgets, best-so-far state and worker turnover; it should not depend on one chat remaining alive. Live mutation remains serialized through one effect-certain executor.
+
 The default production loop is:
 
 1. Observe fresh project state and musical section structure.

@@ -37,7 +37,12 @@ Before any sonic write:
 - render a current full-length baseline/premaster as needed;
 - measure section-level loudness, true peak, crest, spectrum and stereo behavior;
 - ingest one user-selected reference track if available.
-## Phase B - organization proof
+## Phase B - organize and persist project context
+Run the `organize` plane before substantive mix work. Use `PROJECT_ORGANIZATION.md` to classify the Set and persist the hierarchy/routing/role/arrangement/automation/sidechain context later workers will share. Produce a complete organization proposal (names, colors, order, heights, fold state and useful groups), with confidence and unresolved items.
+
+Apply cosmetic organization as a reversible batch only where the classification is confident. Treat group creation/reparenting and other routing-sensitive moves as structural: prove routing equivalence before execution or leave them as proposals. The resulting project-context graph becomes input to the KISS mix orchestrator and specialist workers.
+
+## Phase B.1 - original organization proof notes
 Find only unambiguous hygiene changes first. Examples:
 - generic group names whose purpose can be established from their children;
 - duplicate source names that can be given an audible/functional role without losing the original source name;
