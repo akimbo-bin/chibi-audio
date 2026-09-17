@@ -117,6 +117,14 @@ The reference also suggests that apparent width should be investigated in VOX/FX
 
 These findings are hypotheses to A/B, not automatic mix instructions.
 
+## Mix-engineering workflow pivot - 2026-09-17
+
+The pilot is moving away from one-parameter/full-section brute-force experiments. A real mix engineer would first listen/measure the whole relationship, rank the largest musical bottlenecks, inspect the responsible bus, and only then descend into individual channels. Chibi should do the same.
+
+Current KISS evidence already narrows the first house-drop investigation: DRUMS lead the full-band master-stress evidence, BASS leads the sub-250 Hz stress evidence, the existing bass ducking is very deep, and a real Pro-L 2 experiment (+12.40 -> +12.90 dB Gain) moved Locator 3 only from **-8.53 to -8.45 LUFS** while true peak stayed at **-1.00 dBTP**. That is only **0.16 LU gained per dB of added limiter drive**, below the current clean-loudness efficiency threshold, so harder final limiting is not the next strategy.
+
+The new KISS loop is hierarchical: short master/premaster/major-bus census -> suspect-bus child census -> surgical pre/post evidence -> one serialized reversible candidate -> short re-capture -> full-drop acceptance only for winners. Chibi Core should own this workflow now, with parallel bus/source/sidechain/reference workers sharing structured evidence while one executor owns Ableton effects.
+
 ## Typed ChibiTap capture proof - 2026-09-15
 
 The primary audio-plane path is now proven end-to-end in the real Chibi Lab Set. ChibiTap is the final device on Main and its host-visible `Capture` parameter is controlled only through the guarded `chibitap_capture` bridge capability plus bounded `capture_transport`. No Export Audio/Video dialog or CUA was used for the capture sequence.

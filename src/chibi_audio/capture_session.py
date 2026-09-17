@@ -427,14 +427,30 @@ def _wait_for_transport_completion(
         status = capture_client.transport(
             "status", expected_set_signature=expected_set_signature
         )
-        if not bool(status.get("playing")):
-            observed_stop = status.get("last_scheduled_stop_time")
-            if observed_stop is None:
-                observed_stop = status.get("time", end_beat)
-            if float(observed_stop) + 1.0e-6 < float(end_beat):
-                raise CaptureError("Live transport stopped before requested end beat")
-            return status
-        time.sleep(poll_interval)
+        if bool(status.get("playing")):
+            observed_time = status.get("time")
+            if observed_time is not None and float(observed_time) + 1.0e-6 >= float(end_beat):
+                # The in-Live scheduled stop is primary, but do not let a missed
+                # schedule_message callback run transport past the bounded range.
+                # This fallback is still signature-fenced and only fires after
+                # the status read proves the requested end beat was reached.
+                stopped = capture_client.transport(
+                    "stop", expected_set_signature=expected_set_signature
+                )
+                if not bool(stopped.get("playing")) and not bool(stopped.get("raw_playing")):
+                    status = stopped
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            else:
+                time.sleep(poll_interval)
+                continue
+        observed_stop = status.get("last_scheduled_stop_time")
+        if observed_stop is None:
+            observed_stop = status.get("time", end_beat)
+        if float(observed_stop) + 1.0e-6 < float(end_beat):
+            raise CaptureError("Live transport stopped before requested end beat")
+        return status
     raise CaptureError("Live transport did not stop before capture timeout")
 
 

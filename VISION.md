@@ -60,6 +60,20 @@ For goal-level requests where the artist explicitly authorizes iteration, Chibi 
 8. update the hypothesis from the new evidence and continue;
 9. stop when the target is satisfied, no useful improvement remains, quality regresses, confidence becomes insufficient, the budget is exhausted, or artist judgment is required.
 
+### Hierarchical mix orchestration
+
+For real mix work, Chibi should reason hierarchically rather than brute-force one parameter at a time. Chibi Core moves forward into the active mix loop as the durable workflow authority: one **Mix Orchestrator** owns the best-so-far Set, section goal, evidence graph and experiment budget, while specialist workers investigate buses, sources, sidechains, references and translation in parallel. Workers may propose experiments, but they do not become independent workflow authorities.
+
+The execution model is deliberately asymmetric:
+
+- **one serialized Ableton executor** owns all Live mutations, checkpoints and restores;
+- **bus workers** investigate DRUMS, BASS, VOX, FX and other major groups against the orchestrator's current hypothesis;
+- **source workers** descend only into suspicious children rather than scanning every track after every wave;
+- **cross-bus workers** own relationships such as kick -> bass or vocal -> competing music;
+- all workers share durable artifact/hash/section evidence through Core rather than copying raw audio into model context.
+
+The audio plane should also be hierarchical. Use a short synchronized **bus census** first, then a **suspect-bus census** with that bus's children, then **surgical pre/post captures** only for implicated processors. Diagnostic windows should normally be a few seconds around known stress events; full-drop/full-song captures are acceptance checks for candidates that already won the fast diagnostic round. ChibiTap remains the authoritative surgical evidence path while a faster native/offline render executor is investigated for bulk work.
+
 For loudness work in particular, Chibi should reason about a **clean-loudness knee** rather than maximizing LUFS blindly: the point where more master drive increasingly produces crest collapse, bass flattening, pumping, harshness, clipping or cross-band distortion instead of useful perceived loudness. Sidechain changes are a first-class upstream strategy in that search when time-frequency collisions are creating the loudness bottleneck.
 
 The artist remains the authority on whether a subjective change actually sounds better.

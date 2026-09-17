@@ -231,6 +231,21 @@ Audio embeddings or audio-language models may be used as weak semantic sensors f
 Record predictions against later real listening checks (phone, car, headphones, etc.) so each sensor can be calibrated. Retire or down-weight sensors that do not predict useful outcomes.
 
 **Acceptance:** on KISSKISSKISS, Chibi can (1) identify which source(s) dominate a known harsh/crispy passage and whether the problem is source or downstream processing, (2) explain which bass harmonics remain audible under a phone-like profile and what masks them, and (3) make at least one playback-translation prediction that is checked against a real listening test. The output must remain an evidence-backed hypothesis for the artist, not an autonomous declaration that a mix `sounds good`.
+## R5.6 - Hierarchical mix orchestration and fast evidence plane - ACTIVE TARGET
+
+Move Chibi Core integration forward into the current mix loop instead of waiting until the end of the roadmap. Core remains the sole workflow authority and owns the best-so-far Set, evidence graph, section goal, experiment budget and worker lifecycle. Parallel workers are used for analysis and hypothesis generation; Ableton mutation remains serialized through one effect-certain executor.
+
+The active hierarchy is: Mix Orchestrator -> major-bus workers -> source workers, with cross-bus specialists for sidechain/routing and reference/translation evidence. Workers receive compact structured evidence references and return ranked causal hypotheses plus bounded experiment proposals; they do not independently mutate Live.
+
+Use hierarchical synchronized capture to control realtime cost:
+- **bus census:** master/premaster plus major groups and relevant trigger buses in one short pass;
+- **suspect-bus census:** capture all relevant children of the bus implicated by current evidence in one pass;
+- **surgical capture:** add pre/post points only around the small number of suspected processors or relationships.
+
+Diagnostic windows should normally be 2-8 seconds around known stress/masking events. Full-drop and full-song evidence is reserved for acceptance of candidates that already survived the fast diagnostic round. Benchmark ChibiTap at increasing tap counts and, if per-instance writers become the bottleneck, move toward a shared multi-stream capture backend. Investigate a trustworthy faster-than-realtime/native render executor for bulk evidence, but do not reintroduce steady-state GUI automation merely for speed.
+
+**Acceptance:** on KISSKISSKISS, Core can dispatch at least two specialist investigations from one orchestrated mix wave, share structured evidence between them, execute one serialized reversible Ableton candidate, and complete the diagnostic loop materially faster than the prior one-parameter/full-section workflow.
+
 ## R5.75 - Iterative loud mix/master optimizer - TARGET
 Tracked by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4).
 
@@ -271,6 +286,8 @@ Useful evidence includes:
 Compare the curve and knee with user references by equivalent musical section when possible. A reference is evidence about what is achievable, not a spectral/LUFS target to clone blindly.
 
 ### Iteration wave
+Each wave is orchestrated from the top down rather than as an exhaustive scalar parameter sweep. Start from the master/premaster and major buses, rank a small number of causal hypotheses, descend into only the implicated sources, then choose one coherent intervention. Parallel workers shorten diagnosis; they do not multiply simultaneous Live mutations.
+
 Each optimization wave should:
 1. observe the current best Set/render and fresh evidence;
 2. rank a small number of causal hypotheses from R5/R5.25/R5.5;
@@ -324,8 +341,8 @@ Expand the proven experiment loop to:
 - aligned audio-rate evidence through ChibiTap VST3 instances, with Max for Live retained only for specialized/fallback adapters;
 - perceptual/audibility/translation evidence proven in R5.5;
 - general goal-driven iterative optimization loops derived from the bounded R5.75 loudness workflow.
-## R9 - Chibi / Ultron integration
-Expose proven capabilities to Chibi Core as a specialist production executor. Preserve Core as the only workflow authority and preserve artist approval for subjective material changes by default.
+## R9 - Generalized Chibi / Ultron production integration
+The first Core-native mix orchestration begins earlier in R5.6. R9 generalizes the proven KISS workflow into a reusable Chibi/Ultron production specialization across projects, machines and longer autonomous sessions. Preserve Core as the only workflow authority and preserve artist approval for materially subjective changes by default.
 ## Scope guard
 Before adding a new subsystem, ask:
 **Does the next KISSKISSKISS acceptance boundary require it?**
