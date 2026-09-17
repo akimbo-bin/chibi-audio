@@ -52,33 +52,119 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
             pass
 
 
-def demucs_capability() -> dict[str, Any]:
+def _managed_runtime_root(runtime_root: str | Path | None = None) -> Path:
+    if runtime_root is not None:
+        return Path(runtime_root).expanduser().resolve()
+    configured = os.environ.get("CHIBI_AUDIO_DEMUCS_RUNTIME")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path.home() / ".chibi-audio" / "runtimes" / "demucs").resolve()
+
+
+def _first_file(candidates: tuple[Path, ...]) -> Path | None:
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+def demucs_capability(*, runtime_root: str | Path | None = None) -> dict[str, Any]:
     module_available = importlib.util.find_spec("demucs") is not None
-    executable = shutil.which("demucs")
-    available = module_available or executable is not None
+    path_executable = shutil.which("demucs")
+    managed_root = _managed_runtime_root(runtime_root)
+    managed_executable = _first_file(
+        (
+            managed_root / "Scripts" / "demucs.exe",
+            managed_root / "Scripts" / "demucs",
+            managed_root / "bin" / "demucs",
+            managed_root / "bin" / "demucs.exe",
+        )
+    )
+    managed_python = _first_file(
+        (
+            managed_root / "Scripts" / "python.exe",
+            managed_root / "Scripts" / "python",
+            managed_root / "bin" / "python",
+            managed_root / "bin" / "python3",
+        )
+    )
+
+    override = os.environ.get("CHIBI_AUDIO_DEMUCS_EXECUTABLE")
+    override_path = Path(override).expanduser().resolve() if override else None
+    if override_path is not None and not override_path.is_file():
+        return {
+            "backend": "demucs",
+            "available": False,
+            "python_module_available": module_available,
+            "execution_mode": "invalid_override",
+            "executable": str(override_path),
+            "python_executable": None,
+            "managed_runtime_root": str(managed_root),
+            "reason": "CHIBI_AUDIO_DEMUCS_EXECUTABLE does not point to a file.",
+        }
+
+    if override_path is not None:
+        executable = str(override_path)
+        python_executable = None
+        execution_mode = "configured_executable"
+    elif path_executable:
+        executable = str(Path(path_executable).resolve())
+        python_executable = None
+        execution_mode = "path_executable"
+    elif managed_executable is not None:
+        executable = str(managed_executable)
+        python_executable = None if managed_python is None else str(managed_python)
+        execution_mode = "managed_runtime"
+    elif module_available:
+        executable = None
+        python_executable = sys.executable
+        execution_mode = "current_python_module"
+    else:
+        executable = None
+        python_executable = None
+        execution_mode = "unavailable"
+
+    available = execution_mode != "unavailable"
     return {
         "backend": "demucs",
         "available": available,
         "python_module_available": module_available,
+        "execution_mode": execution_mode,
         "executable": executable,
-        "reason": None if available else "Demucs is not installed in the current runtime.",
+        "python_executable": python_executable,
+        "managed_runtime_root": str(managed_root),
+        "reason": None if available else "Demucs is not installed in the current or managed runtime.",
     }
 
 
 class DemucsSeparatorBackend:
-    def __init__(self, *, model: str = "htdemucs", device: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model: str = "htdemucs",
+        device: str | None = None,
+        runtime_root: str | Path | None = None,
+    ) -> None:
         self.model = str(model).strip() or "htdemucs"
         self.device = None if device is None else str(device).strip() or None
+        self.runtime_root = runtime_root
 
     def capability(self) -> dict[str, Any]:
-        return {**demucs_capability(), "model": self.model, "device": self.device}
+        return {
+            **demucs_capability(runtime_root=self.runtime_root),
+            "model": self.model,
+            "device": self.device,
+        }
 
     def _command(self, source: Path, destination: Path) -> list[str]:
         capability = self.capability()
         if not capability["available"]:
             raise StemSeparationError(str(capability["reason"]))
         executable = capability.get("executable")
-        command = [str(executable)] if executable else [sys.executable, "-m", "demucs"]
+        python_executable = capability.get("python_executable")
+        if executable:
+            command = [str(executable)]
+        elif python_executable:
+            command = [str(python_executable), "-m", "demucs"]
+        else:
+            raise StemSeparationError("Demucs capability was available without an executable runtime")
         command.extend(["-n", self.model, "-o", str(destination)])
         if self.device:
             command.extend(["-d", self.device])

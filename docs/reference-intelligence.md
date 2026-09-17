@@ -21,3 +21,11 @@ Registration is content-addressed. The same audio at a second path reuses the lo
 `reference-analyze-stems` verifies every stem hash before analysis. Separated stems are explicitly treated as model estimates that can contain bleed or artifacts; they are not authoritative source stems.
 
 If Demucs is absent, Chibi Audio reports that capability as unavailable. There is no GUI or silent substitute backend.
+
+A managed Demucs runtime may live at `$HOME\.chibi-audio\runtimes\demucs`; it is discovered without modifying system Python or global `PATH`. `CHIBI_AUDIO_DEMUCS_RUNTIME` and `CHIBI_AUDIO_DEMUCS_EXECUTABLE` provide explicit overrides.
+
+`reference-compare-stems BASELINE.json CANDIDATE.json` compares matching model-estimated roles and reports candidate-minus-baseline deltas for loudness, crest, 20–250 Hz energy share, spectral centroid, stereo correlation, side/mid balance, and activity. The comparison remains `NOT_STARTED` and warns that separated stems may contain bleed and need not sum linearly to the master.
+
+## KISS technical proof
+
+The local Demucs backend successfully separated both the authoritative KISS baseline and Wave-2 renders into verified drums/bass/vocals/other stems. Their whole-master integrated loudness is unchanged, while the separated-role comparison exposes internal redistribution that the master alone hides. This is diagnostic evidence, not an artistic ranking.

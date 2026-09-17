@@ -16,6 +16,7 @@ from .live import LiveBridgeClient
 from .plugins import catalog_dict, discover_plugins
 from .reference_library import ReferenceLibrary
 from .reference_separation import DemucsSeparatorBackend, analyze_separated_stems, demucs_capability
+from .reference_stem_compare import compare_stem_analyses
 
 
 def _tap_capture_arg(value: str) -> TapCaptureInput:
@@ -110,6 +111,12 @@ def main() -> None:
     reference_stems = sub.add_parser("reference-analyze-stems", help="Analyze a verified four-stem separation manifest")
     reference_stems.add_argument("manifest")
     reference_stems.add_argument("--cache-dir")
+
+    reference_stem_compare = sub.add_parser("reference-compare-stems", help="Compare two verified four-stem analysis reports")
+    reference_stem_compare.add_argument("baseline")
+    reference_stem_compare.add_argument("candidate")
+    reference_stem_compare.add_argument("--baseline-label", default="baseline")
+    reference_stem_compare.add_argument("--candidate-label", default="candidate")
 
     finalize = sub.add_parser(
         "finalize-capture",
@@ -211,6 +218,14 @@ def main() -> None:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "reference-analyze-stems":
         result = analyze_separated_stems(args.manifest, cache_dir=args.cache_dir)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == "reference-compare-stems":
+        result = compare_stem_analyses(
+            args.baseline,
+            args.candidate,
+            baseline_label=args.baseline_label,
+            candidate_label=args.candidate_label,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "finalize-capture":
         manifest_path = finalize_aligned_captures(

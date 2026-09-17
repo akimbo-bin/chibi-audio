@@ -34,10 +34,10 @@ class FakeService:
         return FakeReport(role, content_sha256)
 
 
-def test_demucs_backend_reports_unavailable_explicitly(monkeypatch) -> None:
+def test_demucs_backend_reports_unavailable_explicitly(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(separation.importlib.util, "find_spec", lambda name: None)
     monkeypatch.setattr(separation.shutil, "which", lambda name: None)
-    backend = DemucsSeparatorBackend()
+    backend = DemucsSeparatorBackend(runtime_root=tmp_path / "missing-runtime")
     capability = backend.capability()
     assert capability["available"] is False
     assert "not installed" in capability["reason"]
@@ -124,3 +124,35 @@ def test_incomplete_demucs_bundle_fails_closed(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr(separation.subprocess, "run", fake_run)
     with pytest.raises(StemSeparationError, match="complete"):
         DemucsSeparatorBackend().separate(source, output_root=tmp_path / "separated")
+
+
+def test_demucs_backend_discovers_managed_runtime(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(separation.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(separation.shutil, "which", lambda name: None)
+    runtime = tmp_path / "runtime"
+    scripts = runtime / "Scripts"
+    scripts.mkdir(parents=True)
+    executable = scripts / "demucs.exe"
+    executable.write_bytes(b"managed-demucs")
+    python_executable = scripts / "python.exe"
+    python_executable.write_bytes(b"managed-python")
+
+    backend = DemucsSeparatorBackend(runtime_root=runtime)
+    capability = backend.capability()
+    assert capability["available"] is True
+    assert capability["execution_mode"] == "managed_runtime"
+    assert capability["executable"] == str(executable)
+    assert capability["python_executable"] == str(python_executable)
+    command = backend._command(Path("source.wav"), Path("out"))
+    assert command[0] == str(executable)
+
+
+def test_invalid_demucs_executable_override_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(separation.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(separation.shutil, "which", lambda name: None)
+    missing = tmp_path / "missing-demucs.exe"
+    monkeypatch.setenv("CHIBI_AUDIO_DEMUCS_EXECUTABLE", str(missing))
+    capability = separation.demucs_capability(runtime_root=tmp_path / "runtime")
+    assert capability["available"] is False
+    assert capability["execution_mode"] == "invalid_override"
+    assert "does not point to a file" in capability["reason"]
