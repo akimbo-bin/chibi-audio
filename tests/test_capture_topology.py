@@ -94,6 +94,7 @@ class FakeCaptureClient:
         self.setup_calls = []
         self.configure_calls = []
         self.remove_calls = []
+        self.operation_timeouts = []
         self.fail_after_config_once = False
 
     def _guard(self, expected_set_signature):
@@ -133,6 +134,7 @@ class FakeCaptureClient:
         self._target(kwargs)
         signal_point = kwargs["signal_point"]
         self.setup_calls.append((signal_point, kwargs["expected_set_signature"]))
+        self.operation_timeouts.append(("setup", kwargs.get("operation_timeout")))
         index = self.world.expected_index(signal_point)
         ids = self.world.track["devices"]
         if 0 <= index < len(ids):
@@ -169,6 +171,7 @@ class FakeCaptureClient:
             raise RuntimeError("Capture is On")
         if int(device.get("tap_id", 0)) != int(kwargs["expected_tap_id"]):
             raise RuntimeError("Tap ID changed since inspection")
+        self.operation_timeouts.append(("configure", kwargs.get("operation_timeout")))
         self.configure_calls.append(
             (
                 device_id,
@@ -198,6 +201,7 @@ class FakeCaptureClient:
         device = self.world.devices[device_id]
         if device.get("capture"):
             raise RuntimeError("Capture is On")
+        self.operation_timeouts.append(("remove", kwargs.get("operation_timeout")))
         self.remove_calls.append((device_id, signal_point, kwargs["expected_set_signature"]))
         del self.world.track["devices"][index]
         del self.world.devices[device_id]
@@ -248,6 +252,7 @@ def test_prepare_same_track_pre_post_refreshes_signatures_and_restore_is_exact()
     assert world.track["devices"] == [10, 20]
     assert world.devices[20]["tap_id"] == 99
     assert capture.remove_calls == [(1000, "pre_fx", "sig-1")]
+    assert all(timeout == 90.0 for _operation, timeout in capture.operation_timeouts)
 
 
 def test_stale_planned_signature_refuses_before_any_effect():

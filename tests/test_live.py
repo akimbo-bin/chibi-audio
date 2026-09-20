@@ -288,6 +288,7 @@ def test_chibitap_setup_targets_exact_track_identity():
         track_index=34,
         expected_track_name="BASS",
         expected_set_signature="sig-setup",
+        operation_timeout=90.0,
     )
     assert result["method"] == "chibitap_setup"
     assert client.calls[-1][1] == {
@@ -296,6 +297,7 @@ def test_chibitap_setup_targets_exact_track_identity():
         "track_index": 34,
         "expected_track_name": "BASS",
         "expected_set_signature": "sig-setup",
+        "timeout": 90.0,
     }
 
 
@@ -312,6 +314,7 @@ def test_chibitap_configure_guards_tap_id_and_capture():
         capture_enabled=True,
         expected_capture_enabled=False,
         expected_set_signature="sig-config",
+        operation_timeout=90.0,
     )
     assert result["method"] == "chibitap_configure"
     assert client.calls[-1][1] == {
@@ -325,6 +328,7 @@ def test_chibitap_configure_guards_tap_id_and_capture():
         "capture_enabled": True,
         "expected_capture_enabled": False,
         "expected_set_signature": "sig-config",
+        "timeout": 90.0,
     }
     with pytest.raises(LiveBridgeError, match="expected_tap_id"):
         client.configure_chibitap(expected_device_id=1, tap_id=1)
@@ -358,6 +362,7 @@ def test_chibitap_signal_point_validation_and_remove():
         expected_device_id=4321,
         expected_capture_enabled=False,
         expected_set_signature="sig-remove",
+        operation_timeout=90.0,
     )
     assert result["method"] == "chibitap_remove"
     assert client.calls[-1][1] == {
@@ -368,9 +373,13 @@ def test_chibitap_signal_point_validation_and_remove():
         "track_index": 23,
         "expected_track_name": "24-Audio",
         "expected_set_signature": "sig-remove",
+        "timeout": 90.0,
     }
     with pytest.raises(LiveBridgeError, match="expected_capture_enabled=False"):
         client.remove_chibitap(expected_device_id=1, expected_capture_enabled=True)
+
+    with pytest.raises(LiveBridgeError, match="operation_timeout"):
+        client.setup_chibitap(operation_timeout=0)
 
 def test_typed_device_parameter_ref_request_carries_exact_nested_identity():
     client = FakeWriteClient()

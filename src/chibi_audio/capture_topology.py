@@ -8,6 +8,10 @@ from .capture_session import CaptureSessionTap, resolve_session_taps
 from .live import LiveBridgeClient, LiveCaptureClient
 
 
+TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS = 90.0
+TOPOLOGY_TRANSPORT_TIMEOUT_SECONDS = 100.0
+
+
 @dataclass(slots=True)
 class PreparedTopologyTap:
     tap_id: int
@@ -172,8 +176,16 @@ def prepare_capture_topology(
     if len(set(tap_ids)) != len(tap_ids):
         raise CaptureError("capture topology requires unique Tap IDs")
 
-    reader = read_client or LiveBridgeClient(host=host, port=port, timeout=30.0)
-    capture = capture_client or LiveCaptureClient(host=host, port=port, timeout=30.0)
+    reader = read_client or LiveBridgeClient(
+        host=host,
+        port=port,
+        timeout=TOPOLOGY_TRANSPORT_TIMEOUT_SECONDS,
+    )
+    capture = capture_client or LiveCaptureClient(
+        host=host,
+        port=port,
+        timeout=TOPOLOGY_TRANSPORT_TIMEOUT_SECONDS,
+    )
     summary, current_signature = _current_signature(reader)
     initial_signature = current_signature
     if expected_set_signature is not None and current_signature != expected_set_signature:
@@ -190,6 +202,7 @@ def prepare_capture_topology(
             setup = capture.setup_chibitap(
                 **target_kwargs,
                 expected_set_signature=current_signature,
+                operation_timeout=TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS,
             )
             device_id, device_index, prior_tap_id, created = _verify_setup_result(spec, context, setup)
             provisional = PreparedTopologyTap(
@@ -222,6 +235,7 @@ def prepare_capture_topology(
                     expected_tap_id=prior_tap_id,
                     expected_capture_enabled=False,
                     expected_set_signature=current_signature,
+                    operation_timeout=TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS,
                 )
                 provisional.tap_id_changed = True
                 summary, current_signature = _current_signature(reader)
@@ -302,6 +316,7 @@ def _restore_prepared_taps(
                     expected_device_id=tap.device_id,
                     expected_capture_enabled=False,
                     expected_set_signature=current_signature,
+                    operation_timeout=TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS,
                 )
                 actions.append({
                     "action": "remove_created",
@@ -338,6 +353,7 @@ def _restore_prepared_taps(
                     expected_tap_id=observed_tap_id,
                     expected_capture_enabled=False,
                     expected_set_signature=current_signature,
+                    operation_timeout=TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS,
                 )
                 actions.append({
                     "action": "restore_tap_id",
@@ -370,8 +386,16 @@ def restore_capture_topology(
     read_client: LiveBridgeClient | None = None,
     capture_client: LiveCaptureClient | None = None,
 ) -> dict[str, Any]:
-    reader = read_client or LiveBridgeClient(host=host, port=port, timeout=30.0)
-    capture = capture_client or LiveCaptureClient(host=host, port=port, timeout=30.0)
+    reader = read_client or LiveBridgeClient(
+        host=host,
+        port=port,
+        timeout=TOPOLOGY_TRANSPORT_TIMEOUT_SECONDS,
+    )
+    capture = capture_client or LiveCaptureClient(
+        host=host,
+        port=port,
+        timeout=TOPOLOGY_TRANSPORT_TIMEOUT_SECONDS,
+    )
     expected = lease.final_set_signature if expected_set_signature is None else expected_set_signature
     return _restore_prepared_taps(
         reader,
