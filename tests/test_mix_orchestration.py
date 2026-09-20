@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import gzip
+import json
+
+import pytest
 
 from chibi_audio.als import inspect_set
 from chibi_audio.mix_orchestration import (
+    MASTER_STRESS_WAVE_DERIVATION_SCHEMA_VERSION,
     MixHypothesis,
+    MixWavePlanError,
+    build_mix_wave_from_master_stress,
     build_mix_wave_plan,
     project_snapshot_from_saved_set,
 )
@@ -204,3 +210,191 @@ def test_inspect_set_reports_arrangement_clip_spans(tmp_path):
         {"type": "AudioClip", "start_beat": 100.0, "end_beat": 108.0, "disabled": False},
         {"type": "AudioClip", "start_beat": 120.0, "end_beat": 124.0, "disabled": True},
     ]
+
+
+def _write_master_stress_manifest(tmp_path: Path) -> Path:
+    manifest = tmp_path / "master-stress-capture.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "experiment_id": "kiss-stress-fixture",
+                "requested_range": {
+                    "start_beat": 96.0,
+                    "end_beat": 160.0,
+                    "tempo_bpm": 135.0,
+                },
+                "live_session": {
+                    "mixer_state": {
+                        "tap_targets": [
+                            {
+                                "source_label": "MASTER_PRE",
+                                "track_name": "Main",
+                                "placement": "master",
+                            },
+                            {
+                                "source_label": "MASTER_POST",
+                                "track_name": "Main",
+                                "placement": "master",
+                            },
+                            {
+                                "source_label": "BASS_POST",
+                                "track_name": "BASS",
+                                "placement": "track",
+                            },
+                            {
+                                "source_label": "DRUMS_POST",
+                                "track_name": "DRUMS",
+                                "placement": "track",
+                            },
+                        ]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _master_stress_attribution(manifest: Path) -> dict:
+    return {
+        "schema_version": "chibi-audio-master-stress-attribution/v1",
+        "capture_manifest": str(manifest),
+        "experiment_id": "kiss-stress-fixture",
+        "effect_state": "NOT_STARTED",
+        "sources": [
+            {
+                "source_label": "BASS_POST",
+                "rms_correlation_to_stress": 0.10,
+                "low_band_correlation_to_stress": 0.41,
+                "top_stress_rms_uplift_db": 0.50,
+                "top_stress_low_band_uplift_db": 2.78,
+                "top_stress_active_fraction_delta": 0.02,
+            },
+            {
+                "source_label": "DRUMS_POST",
+                "rms_correlation_to_stress": 0.20,
+                "low_band_correlation_to_stress": 0.11,
+                "top_stress_rms_uplift_db": 1.82,
+                "top_stress_low_band_uplift_db": 0.60,
+                "top_stress_active_fraction_delta": 0.01,
+            },
+        ],
+        "leaders": {
+            "rms_correlation_to_stress": {
+                "source_label": "DRUMS_POST",
+                "value": 0.20,
+            },
+            "low_band_correlation_to_stress": {
+                "source_label": "BASS_POST",
+                "value": 0.41,
+            },
+            "top_stress_rms_uplift_db": {
+                "source_label": "DRUMS_POST",
+                "value": 1.82,
+            },
+            "top_stress_low_band_uplift_db": {
+                "source_label": "BASS_POST",
+                "value": 2.78,
+            },
+            "top_stress_active_fraction_delta": None,
+        },
+        "stress_events": {
+            "time_reference": "premaster_capture_start",
+            "minimum_separation_ms": 250.0,
+            "events": [
+                {"rank": 1, "center_time_s": 4.0, "stress_db": 1.6},
+                {"rank": 2, "center_time_s": 10.0, "stress_db": 1.4},
+            ],
+        },
+    }
+
+
+def test_master_stress_evidence_derives_two_metric_specific_bus_workers(tmp_path):
+    manifest = _write_master_stress_manifest(tmp_path)
+    attribution = _master_stress_attribution(manifest)
+    snapshot = _snapshot()
+    snapshot["tempo"] = 135.0
+
+    plan = build_mix_wave_from_master_stress(
+        snapshot,
+        attribution,
+        evidence_ref="artifact:kiss-master-stress",
+        diagnostic_seconds=4.0,
+    )
+
+    assert plan["effect_state"] == "NOT_STARTED"
+    assert plan["ready_for_parallel_analysis"] is True
+    assert plan["blockers"] == []
+    assert [item["hypothesis_id"] for item in plan["workers"]] == [
+        "master-stress-bass",
+        "master-stress-drums",
+    ]
+    assert [item["role"] for item in plan["workers"]] == [
+        "bus_investigator",
+        "bus_investigator",
+    ]
+    assert all(item["live_mutation_authorized"] is False for item in plan["workers"])
+    assert [item["name"] for item in plan["workers"][0]["child_targets"]] == ["SUB"]
+    assert [item["name"] for item in plan["workers"][1]["child_targets"]] == [
+        "KICK",
+        "SNARE",
+    ]
+    assert "low_band_stress_correlation=0.41" in plan["workers"][0]["rationale"]
+    assert "full_band_stress_correlation=0.2" in plan["workers"][1]["rationale"]
+    assert plan["diagnostic_range"]["fast_path"] is True
+    assert plan["diagnostic_range"]["anchor_beat"] == pytest.approx(105.0)
+    assert plan["diagnostic_range"]["start_beat"] == pytest.approx(100.5)
+    assert plan["diagnostic_range"]["end_beat"] == pytest.approx(109.5)
+
+    derivation = plan["evidence_derivation"]
+    assert (
+        derivation["schema_version"]
+        == MASTER_STRESS_WAVE_DERIVATION_SCHEMA_VERSION
+    )
+    assert derivation["no_overall_winner"] is True
+    assert derivation["source_target_map"] == {
+        "BASS_POST": "BASS",
+        "DRUMS_POST": "DRUMS",
+    }
+    assert derivation["stress_event_beats"] == pytest.approx([105.0, 118.5])
+    by_target = {
+        item["target_name"]: item["metrics"]
+        for item in derivation["hypothesis_evidence"]
+    }
+    assert {row["dimension"] for row in by_target["BASS"]} == {
+        "low_band_stress_correlation",
+        "low_band_top_stress_uplift",
+    }
+    assert {row["dimension"] for row in by_target["DRUMS"]} == {
+        "full_band_stress_correlation",
+        "full_band_top_stress_uplift",
+    }
+
+
+def test_master_stress_wave_refuses_tempo_drift_for_event_anchoring(tmp_path):
+    manifest = _write_master_stress_manifest(tmp_path)
+    snapshot = _snapshot()
+    snapshot["tempo"] = 136.0
+
+    plan = build_mix_wave_from_master_stress(
+        snapshot,
+        _master_stress_attribution(manifest),
+    )
+
+    assert plan["ready_for_parallel_analysis"] is False
+    assert plan["evidence_derivation"]["stress_event_beats"] == []
+    assert "capture_tempo_mismatch:135->136" in plan["blockers"]
+    assert plan["diagnostic_range"]["fast_path"] is False
+
+
+def test_master_stress_wave_rejects_untrusted_leader_value(tmp_path):
+    manifest = _write_master_stress_manifest(tmp_path)
+    attribution = _master_stress_attribution(manifest)
+    attribution["leaders"]["rms_correlation_to_stress"]["value"] = 0.99
+    snapshot = _snapshot()
+    snapshot["tempo"] = 135.0
+
+    with pytest.raises(MixWavePlanError, match="disagrees with source row"):
+        build_mix_wave_from_master_stress(snapshot, attribution)
