@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +44,12 @@ def load_organization_schema(path: str | Path) -> dict[str, Any]:
 
 def _normalized(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().replace("_", " ").split())
+
+
+def _source_family_key(name: Any) -> str:
+    """Return a conservative source identity key without the track-order prefix."""
+    stripped = re.sub(r"^\s*\d+\s*-\s*", "", str(name or "").strip(), count=1)
+    return _normalized(stripped)
 
 
 def _matches(name: str, tokens: list[str]) -> bool:
@@ -114,6 +122,125 @@ def _height_class(track: dict[str, Any], root_role: str | None, semantic_role: s
     if len(track.get("devices") or []) >= 6:
         return "tall"
     return str(defaults.get("source") or "medium")
+
+
+def _source_family_color_consensus(
+    rows: list[dict[str, Any]],
+    *,
+    minimum_family_size: int = 3,
+    minimum_dominance: float = 0.80,
+    minimum_role_confidence: float = 0.80,
+) -> dict[Any, dict[str, Any]]:
+    families: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        role = str(row.get("color_role") or "")
+        family = _source_family_key(row.get("name"))
+        color = row.get("current_color_index")
+        if (
+            role
+            and family
+            and color is not None
+            and float(row.get("role_confidence") or 0.0) >= minimum_role_confidence
+        ):
+            families[(role, family)].append(row)
+
+    proposals: dict[Any, dict[str, Any]] = {}
+    for (role, family), members in families.items():
+        if len(members) < minimum_family_size:
+            continue
+        counts = Counter(int(item["current_color_index"]) for item in members)
+        ranked = counts.most_common()
+        if not ranked:
+            continue
+        winner, winner_count = ranked[0]
+        if len(ranked) > 1 and ranked[1][1] == winner_count:
+            continue
+        dominance = winner_count / len(members)
+        if dominance < minimum_dominance:
+            continue
+        for row in members:
+            if int(row["current_color_index"]) == winner:
+                continue
+            proposals[row["track_id"]] = {
+                "value": winner,
+                "role": role,
+                "source_family": family,
+                "family_size": len(members),
+                "support_count": winner_count,
+                "dominance": dominance,
+            }
+    return proposals
+
+
+def _presentation_color_plan(
+    rows: list[dict[str, Any]],
+    schema: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    explicit = {
+        str(role): int(value)
+        for role, value in (schema.get("color_indices") or {}).items()
+        if value is not None
+    }
+    consensus = _source_family_color_consensus(rows)
+    intents: list[dict[str, Any]] = []
+    concrete_edits: list[dict[str, Any]] = []
+
+    for row in rows:
+        role = row.get("color_role")
+        if not role:
+            continue
+        current = row.get("current_color_index")
+        proposed = current
+        basis = "preserve_existing"
+        confidence = float(row.get("role_confidence") or 0.0)
+        reason = "preserve existing color; no explicit or strong same-source consensus override"
+
+        if str(role) in explicit:
+            proposed = explicit[str(role)]
+            basis = "schema"
+            confidence = 1.0
+            reason = "schema color role %s" % role
+        elif row.get("track_id") in consensus:
+            evidence = consensus[row["track_id"]]
+            proposed = evidence["value"]
+            basis = "source_family_consensus"
+            confidence = float(evidence["dominance"])
+            reason = (
+                "same-source color consensus for %s: %d/%d tracks use color %d"
+                % (
+                    evidence["source_family"],
+                    evidence["support_count"],
+                    evidence["family_size"],
+                    evidence["value"],
+                )
+            )
+
+        intent = {
+            "track_id": row["track_id"],
+            "track_name": row["name"],
+            "role": role,
+            "current_color_index": current,
+            "proposed_color_index": proposed,
+            "basis": basis,
+            "confidence": confidence,
+            "reason": reason,
+        }
+        intents.append(intent)
+        if proposed is not None and current != proposed:
+            concrete_edits.append(
+                {
+                    "track_id": row["track_id"],
+                    "track_name": row["name"],
+                    "property": "color_index",
+                    "expected_current_value": current,
+                    "value": proposed,
+                    "reason": reason,
+                    "confidence": confidence,
+                    "basis": basis,
+                }
+            )
+    return intents, concrete_edits
+
 
 def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
     tracks = list(set_report.get("tracks") or [])
@@ -191,23 +318,59 @@ def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) ->
     drum_rows = [row for row in rows if row.get("root_role") == "drums" and row.get("root_group_id") != row.get("track_id")]
     desired_drums = sorted(drum_rows, key=lambda item: tuple(item["order_key"]))
 
-    color_indices = schema.get("color_indices") or {}
-    concrete_edits = []
-    for row in rows:
-        role = row.get("color_role")
-        if role in color_indices and color_indices[role] is not None:
-            wanted = int(color_indices[role])
-            if row.get("current_color_index") != wanted:
-                concrete_edits.append(
-                    {
-                        "track_id": row["track_id"],
-                        "track_name": row["name"],
-                        "property": "color_index",
-                        "expected_current_value": row.get("current_color_index"),
-                        "value": wanted,
-                        "reason": "schema color role %s" % role,
-                    }
-                )
+    current_top_ids = [row["track_id"] for row in top_level]
+    desired_top_ids = [row["track_id"] for row in desired_top]
+    reorder_required = current_top_ids != desired_top_ids
+    structural_blockers = []
+    if reorder_required:
+        structural_blockers.extend(
+            [
+                {
+                    "code": "BOUNDED_REORDER_CAPABILITY_MISSING",
+                    "reason": (
+                        "Live bridge exposes no typed track reorder/group mutation primitive; "
+                        "GUI fallback is disabled by policy."
+                    ),
+                },
+                {
+                    "code": "ROUTING_EQUIVALENCE_PROOF_MISSING",
+                    "reason": (
+                        "Top-level reorder is structural and cannot execute until input/output, "
+                        "parent/group, send, sidechain, and device-state equivalence can be "
+                        "captured and compared transactionally."
+                    ),
+                },
+            ]
+        )
+
+    color_intents, concrete_edits = _presentation_color_plan(rows, schema)
+    naming_intents = [
+        {
+            "track_id": row["track_id"],
+            "current_name": row["name"],
+            "proposed_name": row["name"],
+            "action": "preserve",
+            "confidence": row["role_confidence"],
+            "reason": (
+                "preserve source identity; no explicit high-confidence rename rule"
+                if row["role_confidence"] >= 0.70
+                else "low-confidence classification; preserve name"
+            ),
+        }
+        for row in rows
+    ]
+    height_intents = [
+        {
+            "track_id": row["track_id"],
+            "track_name": row["name"],
+            "height_class": row["height_class"],
+            "confidence": row["role_confidence"],
+            "reason": (
+                "derived from group/role/device complexity policy; presentation only"
+            ),
+        }
+        for row in rows
+    ]
 
     return {
         "schema_version": ORGANIZATION_CONTEXT_SCHEMA_VERSION,
@@ -226,13 +389,25 @@ def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) ->
         "unresolved": unresolved,
         "presentation_plan": {
             "concrete_edits": concrete_edits,
-            "color_intents": [{"track_id": row["track_id"], "role": row.get("color_role")} for row in rows if row.get("color_role")],
-            "height_intents": [{"track_id": row["track_id"], "height_class": row["height_class"]} for row in rows],
+            "naming_intents": naming_intents,
+            "color_intents": color_intents,
+            "height_intents": height_intents,
         },
         "structural_plan": {
+            "current_top_level_order": [
+                {"track_id": row["track_id"], "name": row["name"], "role": row["semantic_role"]}
+                for row in top_level
+            ],
             "top_level_order": [{"track_id": row["track_id"], "name": row["name"], "role": row["semantic_role"]} for row in desired_top],
             "drum_order": [{"track_id": row["track_id"], "name": row["name"], "role": row["semantic_role"], "first_active_beat": row["activity"]["first_active_beat"]} for row in desired_drums],
-            "execution_state": "PLAN_ONLY_NO_ROUTING_SAFE_REORDER_EXECUTOR",
+            "reorder_required": reorder_required,
+            "routing_equivalence_required": reorder_required,
+            "blockers": structural_blockers,
+            "execution_state": (
+                "REFUSED_ROUTING_EQUIVALENCE_NOT_PROVEN"
+                if reorder_required
+                else "NO_STRUCTURAL_CHANGE_NEEDED"
+            ),
         },
     }
 
