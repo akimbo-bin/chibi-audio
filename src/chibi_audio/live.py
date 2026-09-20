@@ -219,6 +219,7 @@ class LiveCaptureClient(_LiveTransport):
         track_index: int | None = None,
         expected_track_name: str | None = None,
         expected_set_signature: str | None = None,
+        operation_timeout: float | None = None,
         verify_capability: bool = True,
     ) -> dict[str, Any]:
         if placement not in {"master", "track"}:
@@ -236,6 +237,10 @@ class LiveCaptureClient(_LiveTransport):
             params["expected_track_name"] = expected_track_name
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
+        if operation_timeout is not None:
+            if float(operation_timeout) <= 0:
+                raise LiveBridgeError("operation_timeout must be > 0")
+            params["timeout"] = float(operation_timeout)
         return self._request("chibitap_setup", params)
 
     def configure_chibitap(
@@ -251,6 +256,7 @@ class LiveCaptureClient(_LiveTransport):
         capture_enabled: bool | None = None,
         expected_capture_enabled: bool | None = None,
         expected_set_signature: str | None = None,
+        operation_timeout: float | None = None,
         verify_capability: bool = True,
     ) -> dict[str, Any]:
         if placement not in {"master", "track"}:
@@ -288,6 +294,10 @@ class LiveCaptureClient(_LiveTransport):
             params["expected_capture_enabled"] = expected_capture_enabled
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
+        if operation_timeout is not None:
+            if float(operation_timeout) <= 0:
+                raise LiveBridgeError("operation_timeout must be > 0")
+            params["timeout"] = float(operation_timeout)
         return self._request("chibitap_configure", params)
 
 
@@ -301,6 +311,7 @@ class LiveCaptureClient(_LiveTransport):
         expected_track_name: str | None = None,
         expected_capture_enabled: bool = False,
         expected_set_signature: str | None = None,
+        operation_timeout: float | None = None,
         verify_capability: bool = True,
     ) -> dict[str, Any]:
         if placement not in {"master", "track"}:
@@ -325,6 +336,10 @@ class LiveCaptureClient(_LiveTransport):
             params["expected_track_name"] = expected_track_name
         if expected_set_signature:
             params["expected_set_signature"] = expected_set_signature
+        if operation_timeout is not None:
+            if float(operation_timeout) <= 0:
+                raise LiveBridgeError("operation_timeout must be > 0")
+            params["timeout"] = float(operation_timeout)
         return self._request("chibitap_remove", params)
 
     def set_chibitap_capture(
