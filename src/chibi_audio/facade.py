@@ -19,6 +19,11 @@ from .sidechain_compare import compare_sidechain_captures
 from .sidechain_configure import configure_sidechain_targets
 from .sidechain_intent import propose_sidechain_intents
 from .sidechain_verify import verify_sidechain_capture
+from .workflow_commands import (
+    WorkflowCommandError,
+    build_workflow_command,
+    load_project_context,
+)
 
 
 class FacadeError(RuntimeError):
@@ -54,6 +59,37 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "device_limit": {"type": "integer", "minimum": 0, "maximum": 256},
             },
             "additionalProperties": False,
+        },
+    },
+    "plan_workflow": {
+        "description": (
+            "Build a stable organize/mix/sidechain/master workflow command from a persisted "
+            "project-context artifact. Planning only: no Live reads or writes are performed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["context_artifact", "intent", "project_ref", "workflow_id", "goal"],
+            "properties": {
+                "context_artifact": {"type": "string", "minLength": 1},
+                "intent": {"enum": ["organize", "mix", "sidechain", "master"]},
+                "project_ref": {"type": "string", "minLength": 1},
+                "workflow_id": {"type": "string", "minLength": 1},
+                "parent_workflow_id": {"type": "string", "minLength": 1},
+                "goal": {"type": "string", "minLength": 1},
+                "mode": {"enum": ["plan", "bounded_wave", "run_until_boundary"]},
+                "set_signature": {"type": "string", "minLength": 1},
+                "guardrails": {"type": "object"},
+                "budget": {
+                    "type": "object",
+                    "properties": {
+                        "max_mutations": {"type": "integer", "minimum": 0},
+                        "max_renders": {"type": "integer", "minimum": 0},
+                        "max_child_jobs": {"type": "integer", "minimum": 0}
+                    },
+                    "additionalProperties": True
+                }
+            },
+            "additionalProperties": False
         },
     },
     "sidechain_audit": {
@@ -427,6 +463,7 @@ class ChibiAudioFacade:
         args = arguments or {}
         handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "status": lambda _a: self.read.status(),
+            "plan_workflow": self._plan_workflow,
             "project_snapshot": lambda a: self.read.set_summary(
                 track_limit=int(a.get("track_limit", 140)),
                 device_limit=int(a.get("device_limit", 24)),
@@ -471,6 +508,29 @@ class ChibiAudioFacade:
         if name not in handlers:
             raise KeyError(f"Unknown Chibi Audio facade tool: {name}")
         return handlers[name](args)
+
+    def _plan_workflow(self, args: dict[str, Any]) -> dict[str, Any]:
+        context_source = self._resolve_artifact(str(args["context_artifact"]))
+        try:
+            context = load_project_context(context_source)
+            return build_workflow_command(
+                context,
+                intent=str(args["intent"]),
+                project_ref=str(args["project_ref"]),
+                workflow_id=str(args["workflow_id"]),
+                parent_workflow_id=(
+                    None
+                    if args.get("parent_workflow_id") is None
+                    else str(args["parent_workflow_id"])
+                ),
+                goal=str(args["goal"]),
+                mode=str(args.get("mode", "plan")),
+                set_signature=args.get("set_signature"),
+                guardrails=dict(args.get("guardrails") or {}),
+                budget=dict(args.get("budget") or {}),
+            )
+        except WorkflowCommandError as exc:
+            raise FacadeError(str(exc)) from exc
 
     def _verify_sidechain_capture(self, args: dict[str, Any]) -> dict[str, Any]:
         kwargs: dict[str, Any] = {

@@ -22,6 +22,8 @@ RawParameterValue = Annotated[float, Field(allow_inf_nan=False)]
 ArtifactPath = Annotated[str, Field(min_length=1, max_length=2_000)]
 TrackIndexList = Annotated[list[TrackIndex], Field(max_length=1_000)]
 DevicePlacement = Literal["track", "master"]
+WorkflowIntent = Literal["organize", "mix", "sidechain", "master"]
+WorkflowMode = Literal["plan", "bounded_wave", "run_until_boundary"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +140,47 @@ def build_mcp_server(
                 "project_snapshot",
                 {"track_limit": track_limit, "device_limit": device_limit},
             )
+        except Exception as exc:  # noqa: BLE001
+            raise _safe_tool_error(exc) from None
+
+    @server.tool(
+        title="Plan durable audio workflow",
+        description=(
+            "Build the stable organize/mix/sidechain/master workflow envelope from a persisted "
+            "project-context artifact below the configured artifact root. This is planning-only "
+            "and performs no Live reads or writes."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def plan_workflow(
+        context_artifact: ArtifactPath,
+        intent: WorkflowIntent,
+        project_ref: ObjectName,
+        workflow_id: ObjectName,
+        goal: ObjectName,
+        mode: WorkflowMode = "plan",
+        parent_workflow_id: ObjectName | None = None,
+        set_signature: SetSignature | None = None,
+        guardrails: dict[str, Any] | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            args: dict[str, Any] = {
+                "context_artifact": context_artifact,
+                "intent": intent,
+                "project_ref": project_ref,
+                "workflow_id": workflow_id,
+                "goal": goal,
+                "mode": mode,
+                "guardrails": dict(guardrails or {}),
+                "budget": dict(budget or {}),
+            }
+            if parent_workflow_id is not None:
+                args["parent_workflow_id"] = parent_workflow_id
+            if set_signature is not None:
+                args["set_signature"] = set_signature
+            return surface.call("plan_workflow", args)
         except Exception as exc:  # noqa: BLE001
             raise _safe_tool_error(exc) from None
 

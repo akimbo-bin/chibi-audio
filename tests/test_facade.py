@@ -407,3 +407,144 @@ def test_sidechain_intent_configuration_routes_one_high_level_command(monkeypatc
     assert schema["required"] == ["source_track_name", "intent"]
     assert "device_id" not in schema["properties"]
     assert "device_index" not in schema["properties"]
+
+
+def _workflow_context_fixture():
+    return {
+        "schema_version": "chibi-audio-project-context/v1",
+        "effect_state": "NOT_STARTED",
+        "mode": "plan",
+        "source_set": {"path": "C:/Lab/KISS.als", "track_count": 2},
+        "organization_schema": {
+            "path": "PROJECT_ORGANIZATION.md",
+            "sha256": "a" * 64,
+            "version": 1,
+        },
+        "tracks": [
+            {
+                "track_id": "10",
+                "index": 0,
+                "type": "GroupTrack",
+                "name": "BASS",
+                "group_id": "-1",
+                "root_group_id": "10",
+                "root_group_name": "BASS",
+                "root_role": "bass",
+                "semantic_role": "bass",
+                "role_confidence": 0.98,
+                "role_reason": "fixture",
+                "activity": {
+                    "span_count": 0,
+                    "first_active_beat": None,
+                    "last_active_beat": None,
+                    "active_duration_beats": 0.0,
+                    "spans": [],
+                },
+                "device_count": 1,
+                "current_color_index": 22,
+                "color_role": "bass",
+                "height_class": "tall",
+                "order_key": [30, 999, 1.0e12, 0],
+            },
+            {
+                "track_id": "20",
+                "index": 1,
+                "type": "MidiTrack",
+                "name": "SIDECHAIN",
+                "group_id": "-1",
+                "root_group_id": None,
+                "root_group_name": None,
+                "root_role": "sidechain",
+                "semantic_role": "sidechain",
+                "role_confidence": 0.98,
+                "role_reason": "fixture",
+                "activity": {
+                    "span_count": 1,
+                    "first_active_beat": 96.0,
+                    "last_active_beat": 96.5,
+                    "active_duration_beats": 0.5,
+                    "spans": [{"start_beat": 96.0, "end_beat": 96.5}],
+                },
+                "device_count": 0,
+                "current_color_index": 69,
+                "color_role": "sidechain",
+                "height_class": "medium",
+                "order_key": [40, 999, 96.0, 1],
+            },
+        ],
+        "unresolved": [],
+        "presentation_plan": {
+            "concrete_edits": [],
+            "naming_intents": [],
+            "color_intents": [],
+            "height_intents": [],
+        },
+        "structural_plan": {
+            "current_top_level_order": [],
+            "top_level_order": [],
+            "drum_order": [],
+            "reorder_required": False,
+            "routing_equivalence_required": False,
+            "blockers": [],
+            "execution_state": "NO_STRUCTURAL_CHANGE_NEEDED",
+        },
+    }
+
+
+def test_plan_workflow_is_artifact_confined_and_makes_no_live_calls(tmp_path):
+    import json
+
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    context = root / "project-context.json"
+    context.write_text(json.dumps(_workflow_context_fixture()), encoding="utf-8")
+    facade = make_facade(root)
+
+    result = facade.call(
+        "plan_workflow",
+        {
+            "context_artifact": "project-context.json",
+            "intent": "sidechain",
+            "project_ref": "kiss-lab",
+            "workflow_id": "sidechain-1",
+            "parent_workflow_id": "mix-1",
+            "goal": "Audit sidechain from persisted project context",
+            "mode": "plan",
+            "set_signature": "sig-context",
+            "budget": {"max_mutations": 0, "max_child_jobs": 2},
+        },
+    )
+
+    assert result["schema_version"] == "chibi-audio-workflow-command/v1"
+    assert result["intent"] == "sidechain"
+    assert result["parent_workflow_id"] == "mix-1"
+    assert result["effect_certainty"] == "NOT_STARTED"
+    assert result["context_view"]["source"] == "persisted_project_context"
+    assert [item["name"] for item in result["context_view"]["trigger_candidates"]] == [
+        "SIDECHAIN"
+    ]
+    assert result["project_identity"]["set_signature"] == "sig-context"
+    assert facade.read.calls == []
+    assert facade.write.calls == []
+
+
+def test_plan_workflow_context_artifact_cannot_escape_root(tmp_path):
+    import json
+
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(_workflow_context_fixture()), encoding="utf-8")
+    facade = make_facade(root)
+
+    with pytest.raises(FacadeError, match="escapes"):
+        facade.call(
+            "plan_workflow",
+            {
+                "context_artifact": "../outside.json",
+                "intent": "mix",
+                "project_ref": "kiss-lab",
+                "workflow_id": "mix-1",
+                "goal": "Plan mix",
+            },
+        )
