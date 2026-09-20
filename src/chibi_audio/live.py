@@ -17,10 +17,11 @@ READ_ONLY_METHODS = frozenset(
         "browser_capabilities",
         "browser_roots",
         "browser_search",
+        "sidechain_graph",
     }
 )
 CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh", "chibitap_remove"})
-BOUNDED_WRITE_METHODS = frozenset({"parameter_set", "track_mixer_parameter_set", "track_set", "device_parameter_set", "device_enabled_set"})
+BOUNDED_WRITE_METHODS = frozenset({"parameter_set", "track_mixer_parameter_set", "track_set", "device_parameter_set", "device_parameter_ref_set", "device_enabled_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
 @dataclass(slots=True)
@@ -96,6 +97,26 @@ class LiveBridgeClient(_LiveTransport):
         return self._request(method, params)
     def status(self) -> dict[str, Any]:
         return self.call("bridge_status")
+    def sidechain_graph(
+        self,
+        *,
+        track_limit: int = 256,
+        max_devices: int = 4096,
+        max_depth: int = 8,
+        include_return_tracks: bool = True,
+        include_master_track: bool = True,
+    ) -> dict[str, Any]:
+        return self.call(
+            "sidechain_graph",
+            {
+                "track_limit": int(track_limit),
+                "max_devices": int(max_devices),
+                "max_depth": int(max_depth),
+                "include_return_tracks": bool(include_return_tracks),
+                "include_master_track": bool(include_master_track),
+            },
+        )
+
     def set_summary(
         self,
         *,
@@ -534,6 +555,56 @@ class LivePilotWriteClient(_LiveTransport):
         if expected_parameter_id is not None:
             params["expected_parameter_id"] = int(expected_parameter_id)
         return self._request("device_parameter_set", params)
+
+    def set_device_parameter_ref(
+        self,
+        *,
+        expected_track_name: str,
+        expected_device_name: str,
+        expected_device_id: int,
+        parameter_index: int,
+        expected_parameter_name: str,
+        expected_current_value: float,
+        value: float,
+        track_index: int | None = None,
+        placement: str = "track",
+        expected_track_id: int | None = None,
+        expected_device_class_name: str | None = None,
+        expected_parameter_id: int | None = None,
+        expected_set_signature: str | None = None,
+        coerce: bool = False,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if parameter_index < 0:
+            raise LiveBridgeError("parameter_index must be >= 0")
+        if not expected_device_name or not expected_parameter_name:
+            raise LiveBridgeError("expected device and parameter names are required")
+        if verify_capability:
+            self._require_method("bounded_write", "device_parameter_ref_set")
+        params = self._device_target_identity(
+            placement=placement,
+            track_index=track_index,
+            expected_track_name=expected_track_name,
+            expected_track_id=expected_track_id,
+            expected_set_signature=expected_set_signature,
+        )
+        params.update(
+            {
+                "expected_device_name": expected_device_name,
+                "expected_device_id": int(expected_device_id),
+                "parameter_index": int(parameter_index),
+                "expected_parameter_name": expected_parameter_name,
+                "expected_current_value": float(expected_current_value),
+                "value": float(value),
+                "coerce": bool(coerce),
+            }
+        )
+        if expected_device_class_name is not None:
+            params["expected_device_class_name"] = expected_device_class_name
+        if expected_parameter_id is not None:
+            params["expected_parameter_id"] = int(expected_parameter_id)
+        return self._request("device_parameter_ref_set", params)
+
 
     def set_device_enabled(
         self,
