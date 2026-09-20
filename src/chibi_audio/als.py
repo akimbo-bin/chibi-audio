@@ -13,7 +13,11 @@ import json
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
+from .plugins import normalize_plugin_name
+
+SET_MAP_SCHEMA_VERSION = "chibi-audio-set-map/v1"
 TRACK_TAGS = {"AudioTrack", "MidiTrack", "GroupTrack", "ReturnTrack"}
 
 
@@ -56,10 +60,13 @@ def plugin_name(device: ET.Element) -> str | None:
     browser_path = first_desc_value(device, "BrowserContentPath") or ""
     if not browser_path:
         return None
-    # Common Live form: query:Plugins#VST3:oeksound:soothe2
-    tail = browser_path.split("#", 1)[-1]
+    # Common Live form: query:Plugins#VST3:oeksound:soothe2. Browser paths may
+    # percent-encode spaces or punctuation; decode before extracting identity.
+    decoded = unquote(browser_path)
+    tail = decoded.split("#", 1)[-1]
     parts = tail.split(":")
-    return parts[-1].strip() if parts else tail.strip()
+    name = parts[-1].strip() if parts else tail.strip()
+    return normalize_plugin_name(name) or None
 
 
 @dataclass(slots=True)
@@ -122,7 +129,11 @@ def inspect_set(path: str | Path) -> dict:
                 pname = plugin_name(device) if dtype == "PluginDevice" else None
                 if pname:
                     plugins.add(pname)
-                enabled_raw = first_desc_value(direct_child(device, "On") or device, "Manual")
+                on_node = direct_child(device, "On")
+                enabled_raw = first_desc_value(
+                    on_node if on_node is not None else device,
+                    "Manual",
+                )
                 enabled = None
                 if enabled_raw in {"true", "false"}:
                     enabled = enabled_raw == "true"
@@ -165,12 +176,28 @@ def inspect_set(path: str | Path) -> dict:
             )
         )
 
+    type_counts: dict[str, int] = {}
+    for track in tracks:
+        type_counts[track.type] = type_counts.get(track.type, 0) + 1
+
     return {
+        "schema_version": SET_MAP_SCHEMA_VERSION,
+        "effect_state": "NOT_STARTED",
         "path": str(set_path),
         "track_count": len(tracks),
         "named_track_count": sum(bool(track.name) for track in tracks),
+        "track_type_counts": dict(sorted(type_counts.items())),
         "plugin_count": len(plugins),
         "plugins": sorted(plugins, key=str.casefold),
+        "group_relationships": [
+            {
+                "track_id": track.id,
+                "track_name": track.name,
+                "group_id": track.group_id,
+            }
+            for track in tracks
+            if track.group_id not in (None, "", "-1")
+        ],
         "tracks": [asdict(track) for track in tracks],
     }
 
