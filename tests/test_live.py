@@ -18,6 +18,8 @@ def test_read_only_surface_excludes_mutation_and_capture():
     assert "agent_audio_tap" not in READ_ONLY_METHODS
     assert "track_mixer_parameter_set" in BOUNDED_WRITE_METHODS
     assert "device_parameter_set" in BOUNDED_WRITE_METHODS
+    assert "device_parameter_ref_set" in BOUNDED_WRITE_METHODS
+    assert "track_presentation_batch_set" in BOUNDED_WRITE_METHODS
     assert "agent_audio_tap" in CAPTURE_METHODS
 
 
@@ -120,7 +122,7 @@ def test_typed_track_property_request_is_narrow():
     )
     assert result["method"] == "track_set"
     assert client.calls[-1][1]["property"] == "solo"
-    with pytest.raises(LiveBridgeError, match="track property must be"):
+    with pytest.raises(LiveBridgeError, match="fold_state"):
         client.set_track_property(
             track_index=4,
             expected_track_name="Hats",
@@ -369,6 +371,47 @@ def test_chibitap_signal_point_validation_and_remove():
     }
     with pytest.raises(LiveBridgeError, match="expected_capture_enabled=False"):
         client.remove_chibitap(expected_device_id=1, expected_capture_enabled=True)
+
+def test_typed_device_parameter_ref_request_carries_exact_nested_identity():
+    client = FakeWriteClient()
+    result = client.set_device_parameter_ref(
+        track_index=34,
+        expected_track_name="BASS",
+        expected_track_id=3400,
+        expected_device_name="Live 8 Compressor",
+        expected_device_class_name="Compressor2",
+        expected_device_id=7777,
+        parameter_index=1,
+        expected_parameter_name="Threshold",
+        expected_parameter_id=8888,
+        expected_current_value=0.0,
+        value=0.1,
+        expected_set_signature="sig-sidechain",
+    )
+    assert result["method"] == "device_parameter_ref_set"
+    params = client.calls[-1][1]
+    assert params["track_index"] == 34
+    assert params["expected_track_id"] == 3400
+    assert params["expected_device_id"] == 7777
+    assert params["expected_device_class_name"] == "Compressor2"
+    assert params["expected_parameter_id"] == 8888
+    assert params["expected_set_signature"] == "sig-sidechain"
+    assert "device_index" not in params
+
+
+def test_device_parameter_ref_requires_exact_device_id():
+    client = FakeWriteClient()
+    with pytest.raises(TypeError):
+        client.set_device_parameter_ref(
+            track_index=34,
+            expected_track_name="BASS",
+            expected_device_name="Live 8 Compressor",
+            parameter_index=1,
+            expected_parameter_name="Threshold",
+            expected_current_value=0.0,
+            value=0.1,
+        )
+
 
 def test_typed_presentation_batch_is_signature_fenced():
     client = FakeWriteClient()

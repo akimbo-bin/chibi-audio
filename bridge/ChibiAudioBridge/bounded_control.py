@@ -5,6 +5,7 @@ BOUNDED_CONTROL_METHODS = (
     "track_set",
     "track_presentation_batch_set",
     "device_parameter_set",
+    "device_parameter_ref_set",
     "device_enabled_set",
 )
 
@@ -76,6 +77,67 @@ def _device(self, track, params):
         raise RuntimeError("Device object identity changed since inspection; refusing write")
     return index, device, device_id
 
+
+
+def _device_ref(self, track, params):
+    expected_id = params.get("expected_device_id")
+    if expected_id is None:
+        raise ValueError("expected_device_id is required for exact device-ref writes")
+    expected_id = int(expected_id)
+    expected_name = params.get("expected_device_name")
+    if not expected_name:
+        raise ValueError("expected_device_name is required for exact device-ref writes")
+    expected_class = params.get("expected_device_class_name")
+    matches = []
+    state = {"count": 0}
+
+    def walk(devices, path, depth):
+        if depth > 16:
+            raise RuntimeError("Device graph exceeds bounded nested-write depth")
+        for device_index, device in enumerate(list(devices)):
+            state["count"] += 1
+            if state["count"] > 4096:
+                raise RuntimeError("Device graph exceeds bounded nested-write device limit")
+            device_id = self._object_id(device)
+            class_name = getattr(device, "class_name", "")
+            device_path = list(path) + [{
+                "kind": "device",
+                "index": int(device_index),
+                "id": device_id,
+                "name": getattr(device, "name", ""),
+                "class_name": class_name,
+            }]
+            if device_id == expected_id:
+                matches.append((device, device_path))
+            for child_name, child_kind in (("chains", "chain"), ("return_chains", "return_chain")):
+                try:
+                    chains = list(getattr(device, child_name))
+                except Exception:
+                    continue
+                for chain_index, chain in enumerate(chains):
+                    chain_path = device_path + [{
+                        "kind": child_kind,
+                        "index": int(chain_index),
+                        "id": self._object_id(chain),
+                        "name": getattr(chain, "name", ""),
+                    }]
+                    try:
+                        child_devices = list(chain.devices)
+                    except Exception:
+                        child_devices = []
+                    walk(child_devices, chain_path, depth + 1)
+
+    walk(getattr(track, "devices", []), [], 0)
+    if len(matches) != 1:
+        raise RuntimeError(
+            "Exact device object is not uniquely contained by the expected track; refusing write"
+        )
+    device, path = matches[0]
+    if getattr(device, "name", "") != expected_name:
+        raise RuntimeError("Device identity mismatch for bounded ref write")
+    if expected_class is not None and getattr(device, "class_name", "") != expected_class:
+        raise RuntimeError("Device class identity mismatch for bounded ref write")
+    return device, expected_id, path
 
 def _parameter(self, device, params):
     index = params.get("parameter_index")
@@ -301,6 +363,23 @@ def rpc_device_parameter_set(self, params):
     return result
 
 
+
+def rpc_device_parameter_ref_set(self, params):
+    track_summary, track = _device_target(self, params)
+    device, device_id, device_path = _device_ref(self, track, params)
+    parameter_index, parameter, parameter_id = _parameter(self, device, params)
+    result = _write_parameter(self, parameter, params)
+    result["track"] = track_summary
+    result["device"] = {
+        "id": device_id,
+        "name": getattr(device, "name", ""),
+        "class_name": getattr(device, "class_name", ""),
+        "path": device_path,
+    }
+    result["parameter_index"] = parameter_index
+    result["parameter_id"] = parameter_id
+    return result
+
 def rpc_device_enabled_set(self, params):
     if type(params.get("enabled")) is not bool:
         raise ValueError("enabled must be a boolean")
@@ -316,5 +395,6 @@ def install_bounded_control(cls):
     cls._rpc_track_set = rpc_track_set
     cls._rpc_track_presentation_batch_set = rpc_track_presentation_batch_set
     cls._rpc_device_parameter_set = rpc_device_parameter_set
+    cls._rpc_device_parameter_ref_set = rpc_device_parameter_ref_set
     cls._rpc_device_enabled_set = rpc_device_enabled_set
     return cls

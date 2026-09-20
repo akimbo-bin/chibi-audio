@@ -15,6 +15,9 @@ from .library import places_dict, read_user_places
 from .live import LiveBridgeClient
 from .organization import build_project_context, load_organization_schema, write_project_context
 from .plugins import catalog_dict, discover_plugins
+from .reference_library import ReferenceLibrary
+from .reference_separation import DemucsSeparatorBackend, analyze_separated_stems, demucs_capability
+from .reference_stem_compare import compare_stem_analyses
 
 
 def _tap_capture_arg(value: str) -> TapCaptureInput:
@@ -77,6 +80,49 @@ def main() -> None:
     level_match.add_argument("--comparison-id", required=True)
     level_match.add_argument("--left-label", default="A")
     level_match.add_argument("--right-label", default="B")
+
+    reference_register = sub.add_parser("reference-register", help="Register a local reference track by content SHA without copying audio")
+    reference_register.add_argument("path")
+    reference_register.add_argument("--library-root", required=True)
+    reference_register.add_argument("--name")
+    reference_register.add_argument("--project")
+    reference_register.add_argument("--set-name")
+    reference_register.add_argument("--window-seconds", type=float, default=12.0)
+
+    reference_set = sub.add_parser("reference-set", help="List a named local reference set")
+    reference_set.add_argument("--library-root", required=True)
+    reference_set.add_argument("--project", required=True)
+    reference_set.add_argument("--set-name", default="default")
+
+    reference_verify = sub.add_parser("reference-verify", help="Reconcile a registered reference against its content SHA")
+    reference_verify.add_argument("content_sha256")
+    reference_verify.add_argument("--library-root", required=True)
+
+    reference_compare = sub.add_parser("reference-compare", help="Compare one local candidate against a named reference set")
+    reference_compare.add_argument("candidate")
+    reference_compare.add_argument("--library-root", required=True)
+    reference_compare.add_argument("--project", required=True)
+    reference_compare.add_argument("--set-name", default="default")
+    reference_compare.add_argument("--label")
+    reference_compare.add_argument("--window-seconds", type=float, default=12.0)
+
+    separator_status = sub.add_parser("reference-separator-status", help="Report local Demucs stem-separation capability")
+
+    reference_separate = sub.add_parser("reference-separate", help="Run local Demucs separation into a SHA-keyed cache")
+    reference_separate.add_argument("path")
+    reference_separate.add_argument("--output-root", required=True)
+    reference_separate.add_argument("--model", default="htdemucs")
+    reference_separate.add_argument("--device")
+
+    reference_stems = sub.add_parser("reference-analyze-stems", help="Analyze a verified four-stem separation manifest")
+    reference_stems.add_argument("manifest")
+    reference_stems.add_argument("--cache-dir")
+
+    reference_stem_compare = sub.add_parser("reference-compare-stems", help="Compare two verified four-stem analysis reports")
+    reference_stem_compare.add_argument("baseline")
+    reference_stem_compare.add_argument("candidate")
+    reference_stem_compare.add_argument("--baseline-label", default="baseline")
+    reference_stem_compare.add_argument("--candidate-label", default="candidate")
 
     finalize = sub.add_parser(
         "finalize-capture",
@@ -155,6 +201,45 @@ def main() -> None:
             right_label=args.right_label,
         )
         print(manifest_path.read_text(encoding="utf-8"), end="")
+    elif args.command == "reference-register":
+        result = ReferenceLibrary(args.library_root).register(
+            args.path,
+            display_name=args.name,
+            project=args.project,
+            set_name=args.set_name,
+            loudest_window_seconds=args.window_seconds,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == "reference-set":
+        rows = ReferenceLibrary(args.library_root).reference_set(args.project, args.set_name)
+        print(json.dumps({"effect_state": "NOT_STARTED", "project": args.project, "set_name": args.set_name, "references": rows}, indent=2, ensure_ascii=False))
+    elif args.command == "reference-verify":
+        print(json.dumps(ReferenceLibrary(args.library_root).verify(args.content_sha256), indent=2, ensure_ascii=False))
+    elif args.command == "reference-compare":
+        result = ReferenceLibrary(args.library_root).compare_candidate(
+            args.candidate,
+            project=args.project,
+            set_name=args.set_name,
+            candidate_label=args.label,
+            loudest_window_seconds=args.window_seconds,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == "reference-separator-status":
+        print(json.dumps(demucs_capability(), indent=2, ensure_ascii=False))
+    elif args.command == "reference-separate":
+        result = DemucsSeparatorBackend(model=args.model, device=args.device).separate(args.path, output_root=args.output_root)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == "reference-analyze-stems":
+        result = analyze_separated_stems(args.manifest, cache_dir=args.cache_dir)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == "reference-compare-stems":
+        result = compare_stem_analyses(
+            args.baseline,
+            args.candidate,
+            baseline_label=args.baseline_label,
+            candidate_label=args.candidate_label,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "finalize-capture":
         manifest_path = finalize_aligned_captures(
             experiment_id=args.experiment_id,

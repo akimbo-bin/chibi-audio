@@ -24,6 +24,12 @@ class FakeRead:
 
     def call(self, method, params=None):
         self.calls.append((method, params or {}))
+        if method == "sidechain_graph":
+            return {
+                "effect_state": "NOT_STARTED",
+                "consumer_count": 1,
+                "consumers": [{"target": {"name": "BASS"}, "source": {"routing_type": "SIDECHAIN"}}],
+            }
         if method == "device_parameters":
             return {
                 "parameters": [
@@ -55,6 +61,9 @@ class FakeWrite:
 
     def set_device_parameter(self, **kwargs):
         return self._record("set_device_parameter", **kwargs)
+
+    def set_device_parameter_ref(self, **kwargs):
+        return self._record("set_device_parameter_ref", **kwargs)
 
     def set_device_enabled(self, **kwargs):
         return self._record("set_device_enabled", **kwargs)
@@ -169,3 +178,232 @@ def test_master_parameter_snapshot_routes_without_track_index():
     schema = TOOL_SCHEMAS["set_device_parameter"]["inputSchema"]
     assert "track_index" not in schema["required"]
     assert schema["properties"]["placement"]["enum"] == ["track", "master"]
+
+
+def test_sidechain_audit_is_explicit_read_only_facade_call():
+    facade = make_facade()
+    assert "sidechain_audit" in facade.tool_names()
+    result = facade.call(
+        "sidechain_audit",
+        {
+            "track_limit": 87,
+            "max_devices": 2048,
+            "max_depth": 7,
+            "include_return_tracks": False,
+            "include_master_track": True,
+        },
+    )
+    assert result["effect_state"] == "NOT_STARTED"
+    assert result["consumers"][0]["target"]["name"] == "BASS"
+    assert facade.read.calls[-1] == (
+        "sidechain_graph",
+        {
+            "track_limit": 87,
+            "max_devices": 2048,
+            "max_depth": 7,
+            "include_return_tracks": False,
+            "include_master_track": True,
+        },
+    )
+
+
+def test_sidechain_capture_verifier_is_artifact_confined_and_analysis_only(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    manifest = root / "capture-manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    observed = {}
+
+    def fake_verify(path, **kwargs):
+        observed["path"] = path
+        observed["kwargs"] = kwargs
+        return {"effect_state": "NOT_STARTED", "status": "MEASURED"}
+
+    monkeypatch.setattr("chibi_audio.facade.verify_sidechain_capture", fake_verify)
+    facade = make_facade(root)
+    result = facade.call(
+        "verify_sidechain_capture",
+        {
+            "manifest": "capture-manifest.json",
+            "trigger_label": "TRIGGER",
+            "target_pre_label": "BASS_PRE",
+            "target_post_label": "BASS_POST",
+            "trigger_threshold_dbfs": -24.0,
+        },
+    )
+    assert result == {"effect_state": "NOT_STARTED", "status": "MEASURED"}
+    assert observed["path"] == manifest.resolve()
+    assert observed["kwargs"]["trigger_label"] == "TRIGGER"
+    assert observed["kwargs"]["trigger_threshold_dbfs"] == -24.0
+    assert "verify_sidechain_capture" in facade.tool_names()
+    assert facade.write.calls == []
+
+
+def test_nested_device_parameter_facade_routes_exact_ref_without_device_index():
+    facade = make_facade()
+    result = facade.call(
+        "set_device_parameter_ref",
+        {
+            "track_index": 34,
+            "expected_track_name": "BASS",
+            "expected_track_id": 3400,
+            "expected_set_signature": "sig-sidechain",
+            "expected_device_name": "Live 8 Compressor",
+            "expected_device_class_name": "Compressor2",
+            "expected_device_id": 7777,
+            "parameter_index": 1,
+            "expected_parameter_name": "Threshold",
+            "expected_parameter_id": 8888,
+            "expected_current_value": 0.0,
+            "value": 0.1,
+        },
+    )
+    assert result["method"] == "set_device_parameter_ref"
+    _, params = facade.write.calls[-1]
+    assert params["expected_device_id"] == 7777
+    assert params["expected_device_class_name"] == "Compressor2"
+    assert params["expected_parameter_id"] == 8888
+    assert "device_index" not in params
+
+
+
+def test_sidechain_comparison_is_confined_and_returns_relative_artifacts(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    base = root / "baseline.json"
+    cand = root / "candidate.json"
+    base.write_text("{}", encoding="utf-8")
+    cand.write_text("{}", encoding="utf-8")
+    observed = {}
+
+    def fake_compare(baseline, candidate, **kwargs):
+        observed["baseline"] = baseline
+        observed["candidate"] = candidate
+        observed["kwargs"] = kwargs
+        out = Path(kwargs["output_dir"])
+        out.mkdir(parents=True, exist_ok=True)
+        ab = out / "proof__level-matched-ab.json"
+        ab.write_text("{}", encoding="utf-8")
+        summary = out / "proof__sidechain-comparison.json"
+        summary.write_text(
+            '{"effect_state":"NOT_STARTED","level_matched_ab_manifest":"' + str(ab).replace('\\', '\\\\') + '"}',
+            encoding="utf-8",
+        )
+        return summary
+
+    monkeypatch.setattr("chibi_audio.facade.compare_sidechain_captures", fake_compare)
+    facade = make_facade(root)
+    result = facade.call(
+        "compare_sidechain_captures",
+        {
+            "baseline_manifest": "baseline.json",
+            "candidate_manifest": "candidate.json",
+            "trigger_label": "TRIGGER",
+            "target_pre_label": "PRE",
+            "target_post_label": "POST",
+            "output_dir": "comparisons/proof",
+            "comparison_id": "proof",
+        },
+    )
+    assert result["effect_state"] == "NOT_STARTED"
+    assert result["comparison_artifact"] == "comparisons/proof/proof__sidechain-comparison.json"
+    assert result["level_matched_ab_manifest"] == "comparisons/proof/proof__level-matched-ab.json"
+    assert observed["baseline"] == base.resolve()
+    assert observed["candidate"] == cand.resolve()
+    assert observed["kwargs"]["output_dir"] == (root / "comparisons" / "proof").resolve()
+    assert facade.write.calls == []
+
+
+def test_artifact_output_directory_refuses_escape(tmp_path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    facade = make_facade(root)
+    with pytest.raises(FacadeError, match="escapes"):
+        facade._resolve_artifact_dir("../outside")
+
+
+
+def test_sidechain_intent_proposal_is_artifact_confined_and_analysis_only(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    analysis = root / "analysis.json"
+    analysis.write_text('{"schema_version":"chibi-audio-capture-analysis/v1","taps":[]}', encoding="utf-8")
+    observed = {}
+
+    def fake_propose(payload, **kwargs):
+        observed["payload"] = payload
+        observed["kwargs"] = kwargs
+        return {"effect_state": "NOT_STARTED", "candidate_count": 2}
+
+    monkeypatch.setattr("chibi_audio.facade.propose_sidechain_intents", fake_propose)
+    facade = make_facade(root)
+    result = facade.call(
+        "propose_sidechain_intents",
+        {
+            "capture_analysis": "analysis.json",
+            "source_label": "VOX_POST",
+            "target_labels": ["FX_POST", "BASS_POST"],
+            "time_tolerance_seconds": 0.08,
+            "max_moments_per_pair": 6,
+        },
+    )
+    assert result == {"effect_state": "NOT_STARTED", "candidate_count": 2}
+    assert observed["payload"]["schema_version"] == "chibi-audio-capture-analysis/v1"
+    assert observed["kwargs"]["source_label"] == "VOX_POST"
+    assert observed["kwargs"]["target_labels"] == ["FX_POST", "BASS_POST"]
+    assert observed["kwargs"]["time_tolerance_seconds"] == 0.08
+    assert observed["kwargs"]["max_moments_per_pair"] == 6
+    assert facade.write.calls == []
+    assert "propose_sidechain_intents" in facade.tool_names()
+
+
+def test_sidechain_intent_proposal_rejects_invalid_json(tmp_path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    (root / "analysis.json").write_text("not-json", encoding="utf-8")
+    facade = make_facade(root)
+    with pytest.raises(FacadeError, match="could not read capture-analysis"):
+        facade.call(
+            "propose_sidechain_intents",
+            {"capture_analysis": "analysis.json", "source_label": "VOX_POST"},
+        )
+
+
+
+def test_sidechain_intent_configuration_routes_one_high_level_command(monkeypatch):
+    observed = {}
+
+    def fake_configure(read, write, **kwargs):
+        observed["read"] = read
+        observed["write"] = write
+        observed["kwargs"] = kwargs
+        return {
+            "effect_state": "STARTED_CONFIRMED",
+            "status": "CONFIGURED",
+            "selected_target_count": 2,
+            "changed_target_count": 2,
+        }
+
+    monkeypatch.setattr("chibi_audio.facade.configure_sidechain_targets", fake_configure)
+    facade = make_facade()
+    result = facade.call(
+        "configure_sidechain_intent",
+        {
+            "source_track_name": "SIDECHAIN",
+            "intent": "ensure_active",
+            "target_track_names": ["VOX", "FX"],
+        },
+    )
+    assert result["selected_target_count"] == 2
+    assert result["changed_target_count"] == 2
+    assert observed["read"] is facade.read
+    assert observed["write"] is facade.write
+    assert observed["kwargs"] == {
+        "source_track_name": "SIDECHAIN",
+        "intent": "ensure_active",
+        "target_track_names": ["VOX", "FX"],
+    }
+    schema = TOOL_SCHEMAS["configure_sidechain_intent"]["inputSchema"]
+    assert schema["required"] == ["source_track_name", "intent"]
+    assert "device_id" not in schema["properties"]
+    assert "device_index" not in schema["properties"]
