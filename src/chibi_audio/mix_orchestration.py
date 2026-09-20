@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import math
+from pathlib import Path
+import re
 from typing import Any, Iterable
+
+from .analysis.stress import MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION
 
 
 MIX_WAVE_PLAN_SCHEMA_VERSION = "chibi-audio-mix-wave-plan/v1"
+MASTER_STRESS_WAVE_DERIVATION_SCHEMA_VERSION = (
+    "chibi-audio-master-stress-wave-derivation/v1"
+)
+
+_MASTER_STRESS_LEADER_METRICS = (
+    ("rms_correlation_to_stress", "full_band_stress_correlation"),
+    ("top_stress_rms_uplift_db", "full_band_top_stress_uplift"),
+    ("low_band_correlation_to_stress", "low_band_stress_correlation"),
+    ("top_stress_low_band_uplift_db", "low_band_top_stress_uplift"),
+    ("top_stress_active_fraction_delta", "top_stress_activity_delta"),
+)
 
 
 class MixWavePlanError(ValueError):
@@ -290,6 +307,349 @@ def build_mix_wave_plan(
         "blockers": sorted(set(blockers)),
         "ready_for_parallel_analysis": bool(workers) and not blockers,
     }
+
+
+
+def _load_master_stress_capture_manifest(
+    attribution: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    if attribution.get("schema_version") != MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION:
+        raise MixWavePlanError(
+            "master stress attribution schema_version is unsupported"
+        )
+    reference = attribution.get("capture_manifest")
+    if not isinstance(reference, str) or not reference.strip():
+        raise MixWavePlanError("master stress attribution has no capture_manifest")
+    path = Path(reference).expanduser().resolve()
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MixWavePlanError(f"could not read capture manifest: {path}") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise MixWavePlanError("master stress capture manifest must use schema_version=1")
+    return path, manifest
+
+
+def _capture_source_target_map(manifest: dict[str, Any]) -> dict[str, str]:
+    live_session = manifest.get("live_session")
+    if not isinstance(live_session, dict):
+        raise MixWavePlanError("capture manifest has no live_session provenance")
+    mixer_state = live_session.get("mixer_state")
+    rows = None
+    if isinstance(mixer_state, dict):
+        rows = mixer_state.get("tap_targets")
+    if not isinstance(rows, list):
+        rows = live_session.get("tap_mapping")
+    if not isinstance(rows, list):
+        raise MixWavePlanError("capture manifest has no tap target mapping")
+
+    result: dict[str, str] = {}
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        source_label = str(item.get("source_label") or "").strip()
+        track_name = str(item.get("track_name") or "").strip()
+        if not source_label or not track_name:
+            continue
+        previous = result.get(source_label)
+        if previous is not None and previous != track_name:
+            raise MixWavePlanError(
+                f"capture source label maps to multiple tracks: {source_label}"
+            )
+        result[source_label] = track_name
+    return result
+
+
+def _master_stress_metric_groups(
+    attribution: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    leaders = attribution.get("leaders")
+    sources = attribution.get("sources")
+    if not isinstance(leaders, dict) or not isinstance(sources, list):
+        raise MixWavePlanError(
+            "master stress attribution requires leaders and sources"
+        )
+    source_rows = {
+        str(row.get("source_label") or ""): row
+        for row in sources
+        if isinstance(row, dict) and str(row.get("source_label") or "")
+    }
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for metric, dimension in _MASTER_STRESS_LEADER_METRICS:
+        leader = leaders.get(metric)
+        if leader is None:
+            continue
+        if not isinstance(leader, dict):
+            raise MixWavePlanError(f"master stress leader is invalid: {metric}")
+        source_label = str(leader.get("source_label") or "").strip()
+        raw_value = leader.get("value")
+        if (
+            not source_label
+            or isinstance(raw_value, bool)
+            or not isinstance(raw_value, (int, float))
+            or not math.isfinite(float(raw_value))
+            or float(raw_value) <= 0.0
+        ):
+            raise MixWavePlanError(
+                f"master stress leader must have a positive finite value: {metric}"
+            )
+        source_row = source_rows.get(source_label)
+        if source_row is None:
+            raise MixWavePlanError(
+                f"master stress leader source is missing from sources: {source_label}"
+            )
+        source_value = source_row.get(metric)
+        if (
+            isinstance(source_value, bool)
+            or not isinstance(source_value, (int, float))
+            or not math.isfinite(float(source_value))
+            or not math.isclose(
+                float(source_value),
+                float(raw_value),
+                rel_tol=1.0e-9,
+                abs_tol=1.0e-12,
+            )
+        ):
+            raise MixWavePlanError(
+                f"master stress leader value disagrees with source row: {metric}"
+            )
+        grouped.setdefault(source_label, []).append(
+            {
+                "metric": metric,
+                "dimension": dimension,
+                "value": float(raw_value),
+            }
+        )
+    return grouped
+
+
+def _hypothesis_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+    return slug or "target"
+
+
+def _stress_event_beats(
+    attribution: dict[str, Any],
+    *,
+    capture_start_beat: float,
+    capture_tempo_bpm: float,
+    section_start_beat: float,
+    section_end_beat: float,
+) -> list[float]:
+    block = attribution.get("stress_events")
+    if not isinstance(block, dict):
+        return []
+    events = block.get("events")
+    if not isinstance(events, list):
+        return []
+    result: list[float] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        raw_time = event.get("center_time_s")
+        if (
+            isinstance(raw_time, bool)
+            or not isinstance(raw_time, (int, float))
+            or not math.isfinite(float(raw_time))
+            or float(raw_time) < 0.0
+        ):
+            continue
+        beat = capture_start_beat + float(raw_time) * capture_tempo_bpm / 60.0
+        if section_start_beat <= beat <= section_end_beat:
+            result.append(beat)
+    return result
+
+
+def build_mix_wave_from_master_stress(
+    project_snapshot: dict[str, Any],
+    attribution: dict[str, Any],
+    *,
+    section: dict[str, Any] | None = None,
+    evidence_ref: str | None = None,
+    diagnostic_seconds: float = 4.0,
+    max_parallel_workers: int = 4,
+    max_bus_taps: int = 12,
+) -> dict[str, Any]:
+    """Derive one Core-ready hierarchical mix wave from master-stress evidence.
+
+    Metric-specific leaders remain separate evidence dimensions. The planner does
+    not compute an overall winner, authorize mutation, or silently fuzzy-match
+    capture labels to tracks.
+    """
+
+    manifest_path, manifest = _load_master_stress_capture_manifest(attribution)
+    source_targets = _capture_source_target_map(manifest)
+    metric_groups = _master_stress_metric_groups(attribution)
+    if not metric_groups:
+        raise MixWavePlanError(
+            "master stress attribution has no positive leader evidence"
+        )
+
+    requested = manifest.get("requested_range")
+    if not isinstance(requested, dict):
+        raise MixWavePlanError("capture manifest has no requested_range")
+    try:
+        capture_start = float(requested["start_beat"])
+        capture_end = float(requested["end_beat"])
+        capture_tempo = float(requested["tempo_bpm"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MixWavePlanError(
+            "capture manifest requested_range is incomplete"
+        ) from exc
+    if capture_end <= capture_start or capture_tempo <= 0.0:
+        raise MixWavePlanError("capture requested range/tempo is invalid")
+
+    selected_section = (
+        dict(section)
+        if section is not None
+        else {
+            "name": str(
+                attribution.get("experiment_id")
+                or manifest.get("experiment_id")
+                or "master-stress-section"
+            ),
+            "start_beat": capture_start,
+            "end_beat": capture_end,
+        }
+    )
+    try:
+        section_start = float(selected_section["start_beat"])
+        section_end = float(selected_section["end_beat"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MixWavePlanError("section requires numeric start_beat/end_beat") from exc
+    if section_end <= section_start:
+        raise MixWavePlanError("section end_beat must be greater than start_beat")
+
+    by_name = _tracks_by_name(project_snapshot)
+    base_ref = (
+        str(evidence_ref).strip()
+        if evidence_ref is not None and str(evidence_ref).strip()
+        else (
+            "master-stress:"
+            + str(
+                attribution.get("experiment_id")
+                or manifest.get("experiment_id")
+                or manifest_path.stem
+            )
+        )
+    )
+    hypotheses: list[MixHypothesis] = []
+    derivation_rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    grouped_by_target: dict[str, list[dict[str, Any]]] = {}
+
+    for source_label, metric_rows in metric_groups.items():
+        target_name = source_targets.get(source_label)
+        if not target_name:
+            blockers.append(f"capture_source_target_missing:{source_label}")
+            continue
+        grouped_by_target.setdefault(target_name, []).extend(
+            [
+                {"source_label": source_label, **row}
+                for row in metric_rows
+            ]
+        )
+
+    for target_name in sorted(grouped_by_target, key=str.casefold):
+        metric_rows = grouped_by_target[target_name]
+        track = _resolve_unique_track(by_name, target_name)
+        scope = (
+            "bus"
+            if track is not None and bool(track.get("is_foldable", False))
+            else "source"
+        )
+        evidence_refs = tuple(
+            f"{base_ref}#leaders/{row['metric']}"
+            for row in metric_rows
+        )
+        evidence_text = ", ".join(
+            f"{row['dimension']}={row['value']:.4g}"
+            for row in metric_rows
+        )
+        hypotheses.append(
+            MixHypothesis(
+                hypothesis_id=f"master-stress-{_hypothesis_slug(target_name)}",
+                scope=scope,
+                target_names=(target_name,),
+                rationale=(
+                    f"{target_name} leads distinct master-stress evidence dimensions "
+                    f"({evidence_text}); investigate this target and its active children "
+                    "before authorizing any mutation."
+                ),
+                evidence_refs=evidence_refs,
+                priority=100,
+            )
+        )
+        derivation_rows.append(
+            {
+                "target_name": target_name,
+                "scope": scope,
+                "metrics": metric_rows,
+                "evidence_refs": list(evidence_refs),
+            }
+        )
+
+    if not hypotheses:
+        raise MixWavePlanError(
+            "master stress leaders could not be mapped to captured track targets"
+        )
+
+    snapshot_tempo = float(project_snapshot.get("tempo") or 0.0)
+    tempo_matches = (
+        snapshot_tempo > 0.0
+        and math.isclose(
+            snapshot_tempo,
+            capture_tempo,
+            rel_tol=0.0,
+            abs_tol=1.0e-6,
+        )
+    )
+    event_beats = (
+        _stress_event_beats(
+            attribution,
+            capture_start_beat=capture_start,
+            capture_tempo_bpm=capture_tempo,
+            section_start_beat=section_start,
+            section_end_beat=section_end,
+        )
+        if tempo_matches
+        else []
+    )
+    if not tempo_matches:
+        blockers.append(
+            f"capture_tempo_mismatch:{capture_tempo:g}->{snapshot_tempo:g}"
+        )
+
+    plan = build_mix_wave_plan(
+        project_snapshot,
+        section=selected_section,
+        hypotheses=hypotheses,
+        event_beats=event_beats,
+        diagnostic_seconds=diagnostic_seconds,
+        max_parallel_workers=max_parallel_workers,
+        max_bus_taps=max_bus_taps,
+    )
+    combined_blockers = sorted(set([*plan["blockers"], *blockers]))
+    plan["blockers"] = combined_blockers
+    plan["ready_for_parallel_analysis"] = bool(plan["workers"]) and not combined_blockers
+    plan["evidence_derivation"] = {
+        "schema_version": MASTER_STRESS_WAVE_DERIVATION_SCHEMA_VERSION,
+        "source": "master_stress_attribution",
+        "attribution_schema_version": attribution["schema_version"],
+        "capture_manifest": str(manifest_path),
+        "evidence_ref": base_ref,
+        "capture_tempo_bpm": capture_tempo,
+        "source_target_map": {
+            source_label: source_targets[source_label]
+            for source_label in metric_groups
+            if source_label in source_targets
+        },
+        "hypothesis_evidence": derivation_rows,
+        "stress_event_beats": event_beats,
+        "no_overall_winner": True,
+        "effect_state": "NOT_STARTED",
+    }
+    return plan
 
 
 def project_snapshot_from_saved_set(

@@ -290,6 +290,51 @@ def attribute_capture_master_stress(
     top_threshold = float(np.percentile(stress_values, top_quantile))
     top_stress = robust & (stress >= top_threshold)
 
+    # Preserve a small set of time-localized anchors so downstream orchestration
+    # can inspect a 2-8 second window around actual stress events instead of
+    # rescanning the entire section. Events are ranked by stress magnitude and
+    # separated to avoid returning adjacent windows from the same excursion.
+    top_indices = np.flatnonzero(top_stress)
+    ranked_indices = sorted(
+        (int(index) for index in top_indices),
+        key=lambda index: float(stress[index]),
+        reverse=True,
+    )
+    hop_seconds = float(hop_frames) / float(sample_rate)
+    minimum_event_separation_s = 0.25
+    minimum_event_separation_windows = max(
+        1,
+        int(round(minimum_event_separation_s / hop_seconds)),
+    )
+    selected_event_indices: list[int] = []
+    for index in ranked_indices:
+        if any(
+            abs(index - previous) < minimum_event_separation_windows
+            for previous in selected_event_indices
+        ):
+            continue
+        selected_event_indices.append(index)
+        if len(selected_event_indices) >= 8:
+            break
+    premaster_offset_windows = max(0, -lag)
+    stress_events = [
+        {
+            "rank": rank,
+            "center_time_s": (
+                (
+                    float(premaster_offset_windows + index) * float(hop_frames)
+                    + float(window_frames) / 2.0
+                )
+                / float(sample_rate)
+            ),
+            "stress_db": float(stress[index]),
+            "chain_gain_db": float(chain_gain[index]),
+            "premaster_rms_dbfs": float(premaster[index]),
+            "master_rms_dbfs": float(master[index]),
+        }
+        for rank, index in enumerate(selected_event_indices, start=1)
+    ]
+
     premaster_corr = _correlation(premaster, stress, robust)
     source_rows: list[dict[str, Any]] = []
     for label in source_names:
@@ -376,6 +421,11 @@ def attribute_capture_master_stress(
             "stress_p90_db": float(np.percentile(stress_values, 90.0)),
             "stress_p99_db": float(np.percentile(stress_values, 99.0)),
             "premaster_rms_correlation_to_stress": premaster_corr,
+        },
+        "stress_events": {
+            "time_reference": "premaster_capture_start",
+            "minimum_separation_ms": minimum_event_separation_s * 1000.0,
+            "events": stress_events,
         },
         "sources": source_rows,
         "leaders": {

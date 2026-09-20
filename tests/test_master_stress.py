@@ -111,6 +111,18 @@ def test_attributes_latency_corrected_master_stress_to_dominant_source(monkeypat
     assert bass["top_stress_rms_uplift_db"] > drums["top_stress_rms_uplift_db"]
     assert result["leaders"]["rms_correlation_to_stress"]["source_label"] == "BASS_POST"
     assert result["leaders"]["top_stress_rms_uplift_db"]["source_label"] == "BASS_POST"
+    events = result["stress_events"]["events"]
+    assert result["stress_events"]["time_reference"] == "premaster_capture_start"
+    assert result["stress_events"]["minimum_separation_ms"] == 250.0
+    assert 1 <= len(events) <= 8
+    assert events[0]["rank"] == 1
+    assert events[0]["stress_db"] >= events[-1]["stress_db"]
+    assert all(0.0 <= item["center_time_s"] <= 8.0 for item in events)
+    assert all(
+        abs(left["center_time_s"] - right["center_time_s"]) >= 0.24
+        for index, left in enumerate(events)
+        for right in events[index + 1 :]
+    )
     assert "no overall winner is inferred" in result["interpretation_note"]
 
 
