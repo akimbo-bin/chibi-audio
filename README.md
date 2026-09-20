@@ -26,9 +26,9 @@ A user-supplied reference track can be analyzed locally as another evidence sour
 Existing Ableton MCP/OSC projects are treated as upstream components and references, not as a second authority. See [docs/ecosystem-research.md](docs/ecosystem-research.md).
 ## Status
 Already proven on the real pilot project:
-- read-only `.als` inspection across 97 tracks;
-- hierarchy/group/device/plugin discovery;
-- installed plugin inventory across VST2/VST3/CLAP roots;
+- versioned read-only `.als` map on the current KISS lab baseline: 87/87 named tracks, 82 validated group relationships, and 15 normalized saved plugin references;
+- hierarchy/group/device/plugin discovery with URL-decoded, architecture-normalized plugin identities;
+- installed plugin inventory across VST2/VST3/CLAP roots, currently 686 physical entries grouped into 472 logical products with mixing/mastering/modulation/instrument role coverage;
 - Ableton Places/sample-library root discovery;
 - a separate `KISSKISSKISS Chibi Lab` disk copy for experiments;
 - an initial upstream research checkout for bridge and analysis candidates;
