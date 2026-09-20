@@ -37,7 +37,12 @@ Before any sonic write:
 - render a current full-length baseline/premaster as needed;
 - measure section-level loudness, true peak, crest, spectrum and stereo behavior;
 - ingest one user-selected reference track if available.
-## Phase B - organization proof
+## Phase B - organize and persist project context
+Run the `organize` plane before substantive mix work. Use `PROJECT_ORGANIZATION.md` to classify the Set and persist the hierarchy/routing/role/arrangement/automation/sidechain context later workers will share. Produce a complete organization proposal (names, colors, order, heights, fold state and useful groups), with confidence and unresolved items.
+
+Apply cosmetic organization as a reversible batch only where the classification is confident. Treat group creation/reparenting and other routing-sensitive moves as structural: prove routing equivalence before execution or leave them as proposals. The resulting project-context graph becomes input to the KISS mix orchestrator and specialist workers.
+
+## Phase B.1 - original organization proof notes
 Find only unambiguous hygiene changes first. Examples:
 - generic group names whose purpose can be established from their children;
 - duplicate source names that can be given an audible/functional role without losing the original source name;
@@ -116,6 +121,14 @@ The first-drop loudness ceiling does **not** look like a simple lack-of-bass pro
 The reference also suggests that apparent width should be investigated in VOX/FX/`other` material rather than widening low-end sources blindly. `All Over` obtains substantial width outside its separated bass/drums.
 
 These findings are hypotheses to A/B, not automatic mix instructions.
+
+## Mix-engineering workflow pivot - 2026-09-17
+
+The pilot is moving away from one-parameter/full-section brute-force experiments. A real mix engineer would first listen/measure the whole relationship, rank the largest musical bottlenecks, inspect the responsible bus, and only then descend into individual channels. Chibi should do the same.
+
+Current KISS evidence already narrows the first house-drop investigation: DRUMS lead the full-band master-stress evidence, BASS leads the sub-250 Hz stress evidence, the existing bass ducking is very deep, and a real Pro-L 2 experiment (+12.40 -> +12.90 dB Gain) moved Locator 3 only from **-8.53 to -8.45 LUFS** while true peak stayed at **-1.00 dBTP**. That is only **0.16 LU gained per dB of added limiter drive**, below the current clean-loudness efficiency threshold, so harder final limiting is not the next strategy.
+
+The new KISS loop is hierarchical: short master/premaster/major-bus census -> suspect-bus child census -> surgical pre/post evidence -> one serialized reversible candidate -> short re-capture -> full-drop acceptance only for winners. Chibi Core should own this workflow now, with parallel bus/source/sidechain/reference workers sharing structured evidence while one executor owns Ableton effects.
 
 ## Typed ChibiTap capture proof - 2026-09-15
 

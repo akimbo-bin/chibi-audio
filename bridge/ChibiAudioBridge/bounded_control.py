@@ -3,6 +3,7 @@ from __future__ import absolute_import, print_function
 BOUNDED_CONTROL_METHODS = (
     "track_mixer_parameter_set",
     "track_set",
+    "track_presentation_batch_set",
     "device_parameter_set",
     "device_parameter_ref_set",
     "device_enabled_set",
@@ -208,28 +209,53 @@ def rpc_track_mixer_parameter_set(self, params):
     return result
 
 
-def rpc_track_set(self, params):
-    track_index, track, track_id = _track(self, params)
-    prop = params.get("property")
-    if prop not in ("mute", "solo", "name", "color_index"):
-        raise ValueError("track property must be mute, solo, name, or color_index")
-    if "expected_current_value" not in params:
-        raise ValueError("expected_current_value is required")
-    before = getattr(track, prop)
-    expected = params.get("expected_current_value")
-    if before != expected:
-        raise RuntimeError("Track property changed since inspection; refusing write")
-    value = params.get("value")
-    if prop in ("mute", "solo") and (type(value) is not bool or type(expected) is not bool):
-        raise ValueError("mute/solo values must be booleans")
+PRESENTATION_TRACK_PROPERTIES = ("name", "color_index", "fold_state", "is_collapsed")
+TRACK_SET_PROPERTIES = ("mute", "solo") + PRESENTATION_TRACK_PROPERTIES
+
+
+def _track_property_value(track, prop):
+    if prop == "is_collapsed":
+        return bool(getattr(track.view, "is_collapsed"))
+    return getattr(track, prop)
+
+
+def _validate_track_property(track, prop, expected, value):
+    if prop not in TRACK_SET_PROPERTIES:
+        raise ValueError("track property must be mute, solo, name, color_index, fold_state, or is_collapsed")
+    if prop in ("mute", "solo", "is_collapsed") and (type(value) is not bool or type(expected) is not bool):
+        raise ValueError("mute/solo/is_collapsed values must be booleans")
     if prop == "name" and (not isinstance(value, str) or not value.strip()):
         raise ValueError("track name must be non-empty")
     if prop == "color_index" and (type(value) is not int or value < 0):
         raise ValueError("color_index must be a non-negative integer")
-    setattr(track, prop, value)
-    after = getattr(track, prop)
+    if prop == "fold_state":
+        if type(value) is not int or value not in (0, 1) or type(expected) is not int:
+            raise ValueError("fold_state values must be integer 0 or 1")
+        if not bool(getattr(track, "is_foldable", False)):
+            raise ValueError("fold_state is only valid for foldable group tracks")
+
+
+def _write_track_property(track, prop, value):
+    target = track.view if prop == "is_collapsed" else track
+    setattr(target, prop, value)
+    after = _track_property_value(track, prop)
     if after != value:
         raise RuntimeError("Track property write did not read back as requested")
+    return after
+
+
+def rpc_track_set(self, params):
+    track_index, track, track_id = _track(self, params)
+    prop = params.get("property")
+    if "expected_current_value" not in params:
+        raise ValueError("expected_current_value is required")
+    expected = params.get("expected_current_value")
+    value = params.get("value")
+    _validate_track_property(track, prop, expected, value)
+    before = _track_property_value(track, prop)
+    if before != expected:
+        raise RuntimeError("Track property changed since inspection; refusing write")
+    after = _write_track_property(track, prop, value)
     return {
         "track": {"index": track_index, "id": track_id, "name": getattr(track, "name", "")},
         "property": prop,
@@ -237,6 +263,90 @@ def rpc_track_set(self, params):
         "requested_value": value,
         "applied_value": after,
         "changed": after != before,
+        "read_back_verified": True,
+    }
+
+
+def rpc_track_presentation_batch_set(self, params):
+    edits = params.get("edits")
+    if not isinstance(edits, list) or not edits:
+        raise ValueError("edits must be a non-empty list")
+    if len(edits) > 256:
+        raise ValueError("presentation batch is limited to 256 edits")
+
+    resolved = []
+    seen = set()
+    for edit in edits:
+        if not isinstance(edit, dict):
+            raise ValueError("each presentation edit must be an object")
+        track_index, track, track_id = _track(self, edit)
+        prop = edit.get("property")
+        if prop not in PRESENTATION_TRACK_PROPERTIES:
+            raise ValueError("presentation batch only supports name, color_index, fold_state, or is_collapsed")
+        key = (track_id, prop)
+        if key in seen:
+            raise ValueError("presentation batch contains duplicate track/property edits")
+        seen.add(key)
+        if "expected_current_value" not in edit:
+            raise ValueError("expected_current_value is required for every presentation edit")
+        expected = edit.get("expected_current_value")
+        value = edit.get("value")
+        _validate_track_property(track, prop, expected, value)
+        before = _track_property_value(track, prop)
+        if before != expected:
+            raise RuntimeError("Track property changed since inspection; refusing presentation batch")
+        resolved.append({
+            "track_index": track_index,
+            "track": track,
+            "track_id": track_id,
+            "property": prop,
+            "before": before,
+            "value": value,
+        })
+
+    ordered = [item for item in resolved if item["property"] != "name"]
+    ordered.extend(item for item in resolved if item["property"] == "name")
+    attempted = []
+    operations = []
+    try:
+        for item in ordered:
+            attempted.append(item)
+            after = _write_track_property(item["track"], item["property"], item["value"])
+            operations.append({
+                "track": {
+                    "index": item["track_index"],
+                    "id": item["track_id"],
+                    "name": getattr(item["track"], "name", ""),
+                },
+                "property": item["property"],
+                "before": item["before"],
+                "requested_value": item["value"],
+                "applied_value": after,
+                "changed": after != item["before"],
+                "read_back_verified": True,
+            })
+    except Exception as exc:
+        rollback_errors = []
+        for item in reversed(attempted):
+            try:
+                restored = _write_track_property(item["track"], item["property"], item["before"])
+                if restored != item["before"]:
+                    raise RuntimeError("rollback read-back mismatch")
+            except Exception as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        if rollback_errors:
+            raise RuntimeError(
+                "Presentation batch failed and rollback was incomplete; effect state is UNKNOWN: %s; rollback errors: %s"
+                % (exc, "; ".join(rollback_errors))
+            )
+        raise RuntimeError("Presentation batch failed and was rolled back exactly: %s" % exc)
+
+    return {
+        "effect_state": "STARTED_CONFIRMED",
+        "rollback_performed": False,
+        "operation_count": len(operations),
+        "changed_count": sum(1 for item in operations if item["changed"]),
+        "operations": operations,
         "read_back_verified": True,
     }
 
@@ -283,6 +393,7 @@ def rpc_device_enabled_set(self, params):
 def install_bounded_control(cls):
     cls._rpc_track_mixer_parameter_set = rpc_track_mixer_parameter_set
     cls._rpc_track_set = rpc_track_set
+    cls._rpc_track_presentation_batch_set = rpc_track_presentation_batch_set
     cls._rpc_device_parameter_set = rpc_device_parameter_set
     cls._rpc_device_parameter_ref_set = rpc_device_parameter_ref_set
     cls._rpc_device_enabled_set = rpc_device_enabled_set

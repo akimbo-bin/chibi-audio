@@ -13,6 +13,13 @@ from .capture_finalize import TapCaptureInput, finalize_aligned_captures
 from .capture_session import CaptureSessionTap, parse_session_tap, run_capture_session
 from .library import places_dict, read_user_places
 from .live import LiveBridgeClient
+from .organization import build_project_context, load_organization_schema, write_project_context
+from .workflow_commands import (
+    WORKFLOW_INTENTS,
+    WORKFLOW_MODES,
+    build_workflow_command,
+    load_project_context,
+)
 from .plugins import catalog_dict, discover_plugins
 from .reference_library import ReferenceLibrary
 from .reference_separation import DemucsSeparatorBackend, analyze_separated_stems, demucs_capability
@@ -37,12 +44,42 @@ def _session_tap_arg(value: str) -> CaptureSessionTap:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _json_object_arg(value: str) -> dict:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError("value must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise argparse.ArgumentTypeError("value must be a JSON object")
+    return payload
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="chibi-audio")
     sub = parser.add_subparsers(dest="command", required=True)
 
     inspect = sub.add_parser("inspect-set", help="Read an Ableton .als file without modifying it")
     inspect.add_argument("path")
+
+    organize = sub.add_parser("organize", help="Build a read-only project organization/context plan")
+    organize.add_argument("path", help="Ableton .als file to inspect")
+    organize.add_argument("--schema", default="PROJECT_ORGANIZATION.md")
+    organize.add_argument("--output", help="Optional durable JSON context output path")
+
+    workflow = sub.add_parser(
+        "plan-workflow",
+        help="Build a stable organize/mix/sidechain/master command from persisted project context",
+    )
+    workflow.add_argument("intent", choices=sorted(WORKFLOW_INTENTS))
+    workflow.add_argument("--context", required=True, help="Durable organization context JSON")
+    workflow.add_argument("--project-ref", required=True)
+    workflow.add_argument("--workflow-id", required=True)
+    workflow.add_argument("--parent-workflow-id")
+    workflow.add_argument("--goal", required=True)
+    workflow.add_argument("--mode", choices=sorted(WORKFLOW_MODES), default="plan")
+    workflow.add_argument("--set-signature")
+    workflow.add_argument("--guardrails-json", type=_json_object_arg, default={})
+    workflow.add_argument("--budget-json", type=_json_object_arg, default={})
 
     plugins = sub.add_parser("scan-plugins", help="Read installed audio plugin locations without modifying them")
     plugins.add_argument("--root", action="append", default=None, help="Optional plugin root; repeat to scan multiple roots")
@@ -164,6 +201,28 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "inspect-set":
         print(dumps_report(inspect_set(args.path)))
+    elif args.command == "organize":
+        report = inspect_set(args.path)
+        schema = load_organization_schema(args.schema)
+        context = build_project_context(report, schema)
+        if args.output:
+            write_project_context(args.output, context)
+        print(json.dumps(context, indent=2, ensure_ascii=False))
+    elif args.command == "plan-workflow":
+        context = load_project_context(args.context)
+        command = build_workflow_command(
+            context,
+            intent=args.intent,
+            project_ref=args.project_ref,
+            workflow_id=args.workflow_id,
+            parent_workflow_id=args.parent_workflow_id,
+            goal=args.goal,
+            mode=args.mode,
+            guardrails=args.guardrails_json,
+            budget=args.budget_json,
+            set_signature=args.set_signature,
+        )
+        print(json.dumps(command, indent=2, ensure_ascii=False))
     elif args.command == "scan-plugins":
         print(json.dumps(catalog_dict(discover_plugins(args.root)), indent=2, ensure_ascii=False))
     elif args.command == "scan-ableton-places":

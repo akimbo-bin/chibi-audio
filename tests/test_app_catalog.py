@@ -25,6 +25,7 @@ READ_ONLY_TOOLS = {
     "list_audio_analyzers",
     "parameter_snapshot",
     "plan_audition",
+    "plan_workflow",
     "plan_section_capture",
     "plan_section_evidence",
     "project_snapshot",

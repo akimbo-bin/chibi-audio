@@ -483,6 +483,35 @@ def test_run_capture_session_budgets_long_play_and_stops_after_lost_response(mon
     configure_calls = [call[1] for call in client.calls if call[0] == "configure"]
     assert [call["capture_enabled"] for call in configure_calls] == [True, False]
 
+def test_wait_for_transport_completion_uses_guarded_stop_after_end_beat():
+    import chibi_audio.capture_session as session
+
+    class MissedScheduledStopClient:
+        def __init__(self):
+            self.calls = []
+
+        def transport(self, action="status", **kwargs):
+            self.calls.append((action, kwargs))
+            if action == "status":
+                return {"playing": True, "time": 160.25}
+            if action == "stop":
+                return {"playing": False, "time": 160.25}
+            raise AssertionError(action)
+
+    client = MissedScheduledStopClient()
+    result = session._wait_for_transport_completion(
+        client,
+        expected_set_signature="sig-1",
+        end_beat=160.0,
+        timeout=1.0,
+        poll_interval=0.05,
+    )
+
+    assert result == {"playing": False, "time": 160.25}
+    assert [call[0] for call in client.calls] == ["status", "stop"]
+    assert all(call[1]["expected_set_signature"] == "sig-1" for call in client.calls)
+
+
 def test_wait_for_capture_quiescence_accepts_file_complete_before_first_poll(monkeypatch, tmp_path):
     import chibi_audio.capture_session as session
 

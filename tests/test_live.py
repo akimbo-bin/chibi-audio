@@ -19,6 +19,7 @@ def test_read_only_surface_excludes_mutation_and_capture():
     assert "track_mixer_parameter_set" in BOUNDED_WRITE_METHODS
     assert "device_parameter_set" in BOUNDED_WRITE_METHODS
     assert "device_parameter_ref_set" in BOUNDED_WRITE_METHODS
+    assert "track_presentation_batch_set" in BOUNDED_WRITE_METHODS
     assert "agent_audio_tap" in CAPTURE_METHODS
 
 
@@ -121,7 +122,7 @@ def test_typed_track_property_request_is_narrow():
     )
     assert result["method"] == "track_set"
     assert client.calls[-1][1]["property"] == "solo"
-    with pytest.raises(LiveBridgeError, match="mute, solo, name, or color_index"):
+    with pytest.raises(LiveBridgeError, match="fold_state"):
         client.set_track_property(
             track_index=4,
             expected_track_name="Hats",
@@ -409,4 +410,31 @@ def test_device_parameter_ref_requires_exact_device_id():
             expected_parameter_name="Threshold",
             expected_current_value=0.0,
             value=0.1,
+        )
+
+
+def test_typed_presentation_batch_is_signature_fenced():
+    client = FakeWriteClient()
+    edits = [
+        {
+            "track_index": 4,
+            "expected_track_name": "Hats",
+            "expected_track_id": 444,
+            "property": "color_index",
+            "expected_current_value": 3,
+            "value": 7,
+        }
+    ]
+    result = client.set_track_presentation_batch(
+        edits,
+        expected_set_signature="sig-organize",
+    )
+    assert result["method"] == "track_presentation_batch_set"
+    params = client.calls[-1][1]
+    assert params["expected_set_signature"] == "sig-organize"
+    assert params["edits"] == edits
+    with pytest.raises(LiveBridgeError, match="presentation edits only support"):
+        client.set_track_presentation_batch(
+            [{**edits[0], "property": "volume"}],
+            expected_set_signature="sig-organize",
         )

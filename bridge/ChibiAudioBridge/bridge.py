@@ -1,4 +1,4 @@
-﻿from __future__ import absolute_import, print_function
+from __future__ import absolute_import, print_function
 
 import json
 import hashlib
@@ -2203,11 +2203,24 @@ class AbletonLiveMCP(ControlSurface):
         if index is not None:
             summary["index"] = index
         summary["name"] = getattr(track, "name", "")
-        for attr in ("is_foldable", "mute", "solo", "arm", "implicit_arm", "can_be_armed"):
+        for attr in ("is_foldable", "is_grouped", "fold_state", "mute", "solo", "arm", "implicit_arm", "can_be_armed"):
             try:
                 summary[attr] = getattr(track, attr)
             except Exception:
                 pass
+        try:
+            group_track = getattr(track, "group_track", None)
+            if group_track is not None:
+                summary["group_track"] = {
+                    "id": self._object_id(group_track),
+                    "name": getattr(group_track, "name", ""),
+                }
+        except Exception:
+            pass
+        try:
+            summary["is_collapsed"] = bool(track.view.is_collapsed)
+        except Exception:
+            pass
         devices = []
         try:
             device_values, device_truncated = self._take(track.devices, device_limit)

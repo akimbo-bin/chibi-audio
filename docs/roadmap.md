@@ -75,15 +75,18 @@ No generic Live setter, arbitrary Python/eval, or silent GUI fallback is allowed
 
 **Acceptance:** common bounded mix adjustments have a typed path; audition/restore and parameter diffs are deterministic; the high-end analyzer localizes synthetic and real events; and the capability surface is ready for an MCP transport. Live mutation proof is coordinated separately so this lane does not collide with an active Set owner.
 
-## R2 - First reversible organization edit
-On the lab Set only:
-- checkpoint current state;
-- choose a few unambiguous naming/color-hygiene improvements;
-- apply exact rename/recolor operations through the typed bridge;
-- re-read and verify every changed value;
-- prove rollback;
-- save a lab variant, never overwrite the original project.
-**Acceptance:** one coherent organization batch is applied and reversed/reapplied reliably with an exact audit trail.
+## R2 - Project organization and persistent context plane - ACTIVE TARGET
+Tracked by [#27](https://github.com/akimbo-bin/chibi-audio/issues/27).
+
+`organize` is the normal first plane before mix work. It should understand the project deeply enough that later mix/sidechain/master workers inherit durable context instead of rescanning and reclassifying the whole Set on every run. `PROJECT_ORGANIZATION.md` is the user-editable preference contract.
+
+Build and persist a project knowledge graph containing hierarchy/routing identity, semantic role + confidence, arrangement activity, related-source families, devices, automation complexity, sidechain relationships and presentation state. Then generate a coherent organization plan covering names, colors, order, heights, fold state and useful grouping.
+
+Cosmetic/presentation operations may be batched when proven audio-neutral. Creating/reparenting groups or any other structural move is routing-sensitive: snapshot inputs/outputs/parents/sends/sidechains first and execute only with an equivalent post-change routing graph or explicit routing intent. Never improve visual organization by silently changing the mix.
+
+Initial schema preferences include VOX -> MUSIC/HARMONIC/MELODIC -> BASS -> SIDECHAIN -> DRUMS -> FX at the top level; functional drum-family ordering with arrangement chronology inside related families; semantic color families with meaningful variation; and track heights derived from automation/complexity/role.
+
+**Acceptance:** KISSKISSKISS receives a durable context graph and full organization proposal; one coherent cosmetic batch can be verified/rolled back/reapplied; at least one structural proposal is either proven routing-equivalent or correctly refused; later workflow planes consume the saved context.
 ## R3 - First meaningful sonic A/B - FIRST SOURCE-LEVEL PROOF COMPLETE / GENERAL LOOP PENDING
 Pilot proof: the D61 source-level -1.0 dB experiment was verified against a same-session zero-change control. It reduced house/bridge density and increased crest without materially changing later sections. The general A/B loop remains pending the typed capture path.
 Pick exactly one evidence-backed mix problem. Candidate classes include:
@@ -231,6 +234,23 @@ Audio embeddings or audio-language models may be used as weak semantic sensors f
 Record predictions against later real listening checks (phone, car, headphones, etc.) so each sensor can be calibrated. Retire or down-weight sensors that do not predict useful outcomes.
 
 **Acceptance:** on KISSKISSKISS, Chibi can (1) identify which source(s) dominate a known harsh/crispy passage and whether the problem is source or downstream processing, (2) explain which bass harmonics remain audible under a phone-like profile and what masks them, and (3) make at least one playback-translation prediction that is checked against a real listening test. The output must remain an evidence-backed hypothesis for the artist, not an autonomous declaration that a mix `sounds good`.
+## R5.6 - Hierarchical mix orchestration and fast evidence plane - ACTIVE TARGET
+
+Move Chibi Core integration forward into the current mix loop instead of waiting until the end of the roadmap. Core remains the sole workflow authority and owns the best-so-far Set, evidence graph, section goal, experiment budget and worker lifecycle. Parallel workers are used for analysis and hypothesis generation; Ableton mutation remains serialized through one effect-certain executor.
+
+This orchestration is exposed through the stable commands in `docs/workflow-commands.md`: `organize`, `mix`, `sidechain`, and `master`. `mix` normally requires/refreshed organized project context first and may create `sidechain` or `master` child workflows. Short MCP calls can request one bounded wave; long-running work belongs to a resumable Core-owned workflow ID.
+
+The active hierarchy is: Mix Orchestrator -> major-bus workers -> source workers, with cross-bus specialists for sidechain/routing and reference/translation evidence. Workers receive compact structured evidence references and return ranked causal hypotheses plus bounded experiment proposals; they do not independently mutate Live.
+
+Use hierarchical synchronized capture to control realtime cost:
+- **bus census:** master/premaster plus major groups and relevant trigger buses in one short pass;
+- **suspect-bus census:** capture all relevant children of the bus implicated by current evidence in one pass;
+- **surgical capture:** add pre/post points only around the small number of suspected processors or relationships.
+
+Diagnostic windows should normally be 2-8 seconds around known stress/masking events. Full-drop and full-song evidence is reserved for acceptance of candidates that already survived the fast diagnostic round. Benchmark ChibiTap at increasing tap counts and, if per-instance writers become the bottleneck, move toward a shared multi-stream capture backend. Investigate a trustworthy faster-than-realtime/native render executor for bulk evidence, but do not reintroduce steady-state GUI automation merely for speed.
+
+**Acceptance:** on KISSKISSKISS, Core can dispatch at least two specialist investigations from one orchestrated mix wave, share structured evidence between them, execute one serialized reversible Ableton candidate, and complete the diagnostic loop materially faster than the prior one-parameter/full-section workflow.
+
 ## R5.75 - Iterative loud mix/master optimizer - TARGET
 Tracked by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4).
 
@@ -271,6 +291,8 @@ Useful evidence includes:
 Compare the curve and knee with user references by equivalent musical section when possible. A reference is evidence about what is achievable, not a spectral/LUFS target to clone blindly.
 
 ### Iteration wave
+Each wave is orchestrated from the top down rather than as an exhaustive scalar parameter sweep. Start from the master/premaster and major buses, rank a small number of causal hypotheses, descend into only the implicated sources, then choose one coherent intervention. Parallel workers shorten diagnosis; they do not multiply simultaneous Live mutations.
+
 Each optimization wave should:
 1. observe the current best Set/render and fresh evidence;
 2. rank a small number of causal hypotheses from R5/R5.25/R5.5;
@@ -324,8 +346,8 @@ Expand the proven experiment loop to:
 - aligned audio-rate evidence through ChibiTap VST3 instances, with Max for Live retained only for specialized/fallback adapters;
 - perceptual/audibility/translation evidence proven in R5.5;
 - general goal-driven iterative optimization loops derived from the bounded R5.75 loudness workflow.
-## R9 - Chibi / Ultron integration
-Expose proven capabilities to Chibi Core as a specialist production executor. Preserve Core as the only workflow authority and preserve artist approval for subjective material changes by default.
+## R9 - Generalized Chibi / Ultron production integration
+The first Core-native mix orchestration begins earlier in R5.6. R9 generalizes the proven KISS workflow into a reusable Chibi/Ultron production specialization across projects, machines and longer autonomous sessions. Preserve Core as the only workflow authority and preserve artist approval for materially subjective changes by default.
 ## Scope guard
 Before adding a new subsystem, ask:
 **Does the next KISSKISSKISS acceptance boundary require it?**
