@@ -13,6 +13,7 @@ from .capture_finalize import TapCaptureInput, finalize_aligned_captures
 from .capture_session import CaptureSessionTap, parse_session_tap, run_capture_session
 from .library import places_dict, read_user_places
 from .live import LiveBridgeClient
+from .organization import build_project_context, load_organization_schema, write_project_context
 from .plugins import catalog_dict, discover_plugins
 
 
@@ -40,6 +41,11 @@ def main() -> None:
 
     inspect = sub.add_parser("inspect-set", help="Read an Ableton .als file without modifying it")
     inspect.add_argument("path")
+
+    organize = sub.add_parser("organize", help="Build a read-only project organization/context plan")
+    organize.add_argument("path", help="Ableton .als file to inspect")
+    organize.add_argument("--schema", default="PROJECT_ORGANIZATION.md")
+    organize.add_argument("--output", help="Optional durable JSON context output path")
 
     plugins = sub.add_parser("scan-plugins", help="Read installed audio plugin locations without modifying them")
     plugins.add_argument("--root", action="append", default=None, help="Optional plugin root; repeat to scan multiple roots")
@@ -118,6 +124,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "inspect-set":
         print(dumps_report(inspect_set(args.path)))
+    elif args.command == "organize":
+        report = inspect_set(args.path)
+        schema = load_organization_schema(args.schema)
+        context = build_project_context(report, schema)
+        if args.output:
+            write_project_context(args.output, context)
+        print(json.dumps(context, indent=2, ensure_ascii=False))
     elif args.command == "scan-plugins":
         print(json.dumps(catalog_dict(discover_plugins(args.root)), indent=2, ensure_ascii=False))
     elif args.command == "scan-ableton-places":

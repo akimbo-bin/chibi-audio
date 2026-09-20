@@ -79,6 +79,7 @@ class ArrangementClipInfo:
 
 @dataclass(slots=True)
 class TrackInfo:
+    index: int
     id: str | None
     type: str
     name: str
@@ -153,6 +154,7 @@ def inspect_set(path: str | Path) -> dict:
 
         tracks.append(
             TrackInfo(
+                index=len(tracks),
                 id=node.attrib.get("Id"),
                 type=kind,
                 name=track_name(node),

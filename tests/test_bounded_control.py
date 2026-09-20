@@ -40,12 +40,20 @@ class Device:
         ]
 
 
+class TrackView:
+    def __init__(self):
+        self.is_collapsed = False
+
+
 class Track:
     def __init__(self):
         self.name = "Hats"
         self.mute = False
         self.solo = False
         self.color_index = 3
+        self.is_foldable = True
+        self.fold_state = 0
+        self.view = TrackView()
         self.mixer_device = Mixer()
         self.devices = [Device()]
 
@@ -236,3 +244,108 @@ def test_master_device_write_refuses_track_index_and_stale_identity():
                 "value": 0.30,
             },
         )
+
+
+def test_track_presentation_properties_are_typed_and_read_back():
+    bridge = FakeBridge()
+    track = bridge.song().tracks[0]
+    fold = bounded_control.rpc_track_set(
+        bridge,
+        {
+            "track_index": 0,
+            "expected_track_name": "Hats",
+            "expected_track_id": id(track),
+            "property": "fold_state",
+            "expected_current_value": 0,
+            "value": 1,
+        },
+    )
+    assert fold["read_back_verified"] is True
+    assert track.fold_state == 1
+    collapsed = bounded_control.rpc_track_set(
+        bridge,
+        {
+            "track_index": 0,
+            "expected_track_name": "Hats",
+            "expected_track_id": id(track),
+            "property": "is_collapsed",
+            "expected_current_value": False,
+            "value": True,
+        },
+    )
+    assert collapsed["read_back_verified"] is True
+    assert track.view.is_collapsed is True
+
+
+
+def test_presentation_batch_validates_then_applies_name_last():
+    bridge = FakeBridge()
+    track = bridge.song().tracks[0]
+    result = bounded_control.rpc_track_presentation_batch_set(
+        bridge,
+        {
+            "edits": [
+                {
+                    "track_index": 0,
+                    "expected_track_name": "Hats",
+                    "expected_track_id": id(track),
+                    "property": "name",
+                    "expected_current_value": "Hats",
+                    "value": "Hat Loop",
+                },
+                {
+                    "track_index": 0,
+                    "expected_track_name": "Hats",
+                    "expected_track_id": id(track),
+                    "property": "color_index",
+                    "expected_current_value": 3,
+                    "value": 7,
+                },
+            ]
+        },
+    )
+    assert result["operation_count"] == 2
+    assert [item["property"] for item in result["operations"]] == ["color_index", "name"]
+    assert track.color_index == 7
+    assert track.name == "Hat Loop"
+
+def test_presentation_batch_rolls_back_all_attempted_edits(monkeypatch):
+    bridge = FakeBridge()
+    first = bridge.song().tracks[0]
+    second = Track()
+    second.name = "Perc"
+    bridge.song().tracks.append(second)
+    original = bounded_control._write_track_property
+
+    def fail_second(track, prop, value):
+        if track is second and prop == "is_collapsed" and value is True:
+            raise RuntimeError("synthetic write failure")
+        return original(track, prop, value)
+
+    monkeypatch.setattr(bounded_control, "_write_track_property", fail_second)
+    with pytest.raises(RuntimeError, match="rolled back exactly"):
+        bounded_control.rpc_track_presentation_batch_set(
+            bridge,
+            {
+                "edits": [
+                    {
+                        "track_index": 0,
+                        "expected_track_name": "Hats",
+                        "expected_track_id": id(first),
+                        "property": "color_index",
+                        "expected_current_value": 3,
+                        "value": 7,
+                    },
+                    {
+                        "track_index": 1,
+                        "expected_track_name": "Perc",
+                        "expected_track_id": id(second),
+                        "property": "is_collapsed",
+                        "expected_current_value": False,
+                        "value": True,
+                    },
+                ]
+            },
+        )
+    assert first.color_index == 3
+    assert second.view.is_collapsed is False

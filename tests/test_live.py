@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -120,7 +120,7 @@ def test_typed_track_property_request_is_narrow():
     )
     assert result["method"] == "track_set"
     assert client.calls[-1][1]["property"] == "solo"
-    with pytest.raises(LiveBridgeError, match="mute, solo, name, or color_index"):
+    with pytest.raises(LiveBridgeError, match="track property must be"):
         client.set_track_property(
             track_index=4,
             expected_track_name="Hats",
@@ -369,3 +369,29 @@ def test_chibitap_signal_point_validation_and_remove():
     }
     with pytest.raises(LiveBridgeError, match="expected_capture_enabled=False"):
         client.remove_chibitap(expected_device_id=1, expected_capture_enabled=True)
+
+def test_typed_presentation_batch_is_signature_fenced():
+    client = FakeWriteClient()
+    edits = [
+        {
+            "track_index": 4,
+            "expected_track_name": "Hats",
+            "expected_track_id": 444,
+            "property": "color_index",
+            "expected_current_value": 3,
+            "value": 7,
+        }
+    ]
+    result = client.set_track_presentation_batch(
+        edits,
+        expected_set_signature="sig-organize",
+    )
+    assert result["method"] == "track_presentation_batch_set"
+    params = client.calls[-1][1]
+    assert params["expected_set_signature"] == "sig-organize"
+    assert params["edits"] == edits
+    with pytest.raises(LiveBridgeError, match="presentation edits only support"):
+        client.set_track_presentation_batch(
+            [{**edits[0], "property": "volume"}],
+            expected_set_signature="sig-organize",
+        )

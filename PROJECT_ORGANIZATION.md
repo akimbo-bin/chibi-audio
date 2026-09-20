@@ -15,6 +15,41 @@ Default top-level order:
 5. DRUMS
 6. FX
 
+## Machine-readable preferences
+
+The JSON block below is the part Chibi reads directly. Keep the prose in this document as the human explanation and update this block when a preference should change execution.
+
+<!-- chibi-audio:organization-schema:start -->
+```json
+{
+  "schema_version": 1,
+  "top_level": [
+    {"role": "vox", "labels": ["vox", "vocal", "vocals"], "order": 10, "color_role": "vox"},
+    {"role": "music", "labels": ["music", "harmonic", "melodic", "instruments"], "order": 20, "color_role": "music"},
+    {"role": "bass", "labels": ["bass", "low end", "low-end"], "order": 30, "color_role": "bass"},
+    {"role": "sidechain", "labels": ["sidechain", "trigger", "triggers"], "order": 40, "color_role": "sidechain"},
+    {"role": "drums", "labels": ["drums", "drum"], "order": 50, "color_role": "drums"},
+    {"role": "fx", "labels": ["fx", "effects", "sfx"], "order": 60, "color_role": "fx"}
+  ],
+  "drums": [
+    {"role": "kick_layer", "tokens": ["half kick", "top kick", "kick layer", "layered kick", "secondary kick"], "order": 15, "color_role": "drums.kick_layer", "height": "compact"},
+    {"role": "kick", "tokens": ["kick"], "order": 10, "color_role": "drums.kick", "height": "compact"},
+    {"role": "snare_clap", "tokens": ["snare", "clap"], "order": 20, "color_role": "drums.snare_clap", "height": "compact"},
+    {"role": "hat", "tokens": ["hihat", "hi-hat", "hat"], "order": 30, "color_role": "drums.hat", "height": "compact"},
+    {"role": "cymbal", "tokens": ["ride", "cymbal", "crash"], "order": 40, "color_role": "drums.cymbal", "height": "compact"},
+    {"role": "percussion_top", "tokens": ["top perc", "perc top", "high perc"], "order": 50, "color_role": "drums.percussion_top", "height": "compact"},
+    {"role": "percussion_bottom", "tokens": ["bottom perc", "perc bottom", "low perc"], "order": 60, "color_role": "drums.percussion_bottom", "height": "compact"},
+    {"role": "percussion", "tokens": ["percussion", "perc"], "order": 55, "color_role": "drums.percussion", "height": "compact"},
+    {"role": "break_loop", "tokens": ["break", "loop", "beat"], "order": 70, "color_role": "drums.break_loop", "height": "compact"},
+    {"role": "fill_transition", "tokens": ["fill", "transition", "riser"], "order": 80, "color_role": "drums.fill_transition", "height": "compact"}
+  ],
+  "height_defaults": {"group": "tall", "source": "medium", "simple_drums": "compact", "simple_fx": "compact"},
+  "color_indices": {},
+  "section_order": ["intro", "build_1", "drop_1", "bridge", "build_2", "drop_2", "outro"]
+}
+```
+<!-- chibi-audio:organization-schema:end -->
+
 Omit categories that do not exist. Preserve exceptional routing or creative structure when moving a track would be unsafe.
 ## Drum-family order
 

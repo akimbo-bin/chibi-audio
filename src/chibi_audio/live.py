@@ -20,7 +20,7 @@ READ_ONLY_METHODS = frozenset(
     }
 )
 CAPTURE_METHODS = frozenset({"agent_audio_tap", "capture_probe_setup", "capture_probe_refresh", "capture_transport", "chibitap_setup", "chibitap_configure", "chibitap_capture", "chibitap_refresh", "chibitap_remove"})
-BOUNDED_WRITE_METHODS = frozenset({"parameter_set", "track_mixer_parameter_set", "track_set", "device_parameter_set", "device_enabled_set"})
+BOUNDED_WRITE_METHODS = frozenset({"parameter_set", "track_mixer_parameter_set", "track_set", "track_presentation_batch_set", "device_parameter_set", "device_enabled_set"})
 class LiveBridgeError(RuntimeError):
     """Raised when the local Live bridge cannot safely satisfy a request."""
 @dataclass(slots=True)
@@ -438,8 +438,8 @@ class LivePilotWriteClient(_LiveTransport):
         expected_set_signature: str | None = None,
         verify_capability: bool = True,
     ) -> dict[str, Any]:
-        if property not in {"mute", "solo", "name", "color_index"}:
-            raise LiveBridgeError("track property must be mute, solo, name, or color_index")
+        if property not in {"mute", "solo", "name", "color_index", "fold_state", "is_collapsed"}:
+            raise LiveBridgeError("track property must be mute, solo, name, color_index, fold_state, or is_collapsed")
         if verify_capability:
             self._require_method("bounded_write", "track_set")
         params = self._track_identity(
@@ -456,6 +456,35 @@ class LivePilotWriteClient(_LiveTransport):
             }
         )
         return self._request("track_set", params)
+
+    def set_track_presentation_batch(
+        self,
+        edits: list[dict[str, Any]],
+        *,
+        expected_set_signature: str,
+        verify_capability: bool = True,
+    ) -> dict[str, Any]:
+        if not expected_set_signature:
+            raise LiveBridgeError("expected_set_signature is required")
+        if not isinstance(edits, list) or not edits:
+            raise LiveBridgeError("edits must be a non-empty list")
+        allowed = {"name", "color_index", "fold_state", "is_collapsed"}
+        normalized = []
+        for edit in edits:
+            if not isinstance(edit, dict):
+                raise LiveBridgeError("each presentation edit must be an object")
+            prop = edit.get("property")
+            if prop not in allowed:
+                raise LiveBridgeError("presentation edits only support name, color_index, fold_state, or is_collapsed")
+            item = dict(edit)
+            item.pop("expected_set_signature", None)
+            normalized.append(item)
+        if verify_capability:
+            self._require_method("bounded_write", "track_presentation_batch_set")
+        return self._request(
+            "track_presentation_batch_set",
+            {"expected_set_signature": expected_set_signature, "edits": normalized},
+        )
 
     def _device_target_identity(
         self,
