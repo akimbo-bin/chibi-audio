@@ -110,6 +110,38 @@ class AnalysisFabricBridge:
                 tap["artifact_path"] = tap_path.relative_to(self.artifact_root).as_posix()
         return result
 
+    def attribute_capture_master_stress(
+        self,
+        manifest: str,
+        *,
+        premaster_label: str,
+        master_label: str,
+        source_labels: Iterable[str],
+        window_ms: float = 100.0,
+        hop_ms: float = 10.0,
+        max_latency_ms: float = 500.0,
+        low_band_hz: float = 250.0,
+        active_threshold_dbfs: float = -45.0,
+        top_stress_fraction: float = 0.10,
+    ) -> dict[str, Any]:
+        module = self._require_module()
+        source = self._resolve_artifact(manifest)
+        self._validate_manifest_artifacts(source)
+        result = module.attribute_capture_master_stress(
+            source,
+            premaster_label=premaster_label,
+            master_label=master_label,
+            source_labels=tuple(source_labels),
+            window_ms=window_ms,
+            hop_ms=hop_ms,
+            max_latency_ms=max_latency_ms,
+            low_band_hz=low_band_hz,
+            active_threshold_dbfs=active_threshold_dbfs,
+            top_stress_fraction=top_stress_fraction,
+        )
+        result["capture_manifest"] = source.relative_to(self.artifact_root).as_posix()
+        return result
+
     def compare_reports(
         self,
         left: dict[str, Any],
