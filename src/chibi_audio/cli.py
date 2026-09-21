@@ -20,7 +20,7 @@ from .workflow_commands import (
     build_workflow_command,
     load_project_context,
 )
-from .plugins import catalog_dict, discover_plugins
+from .plugins import catalog_dict, discover_plugins, query_installed_plugins
 from .reference_library import ReferenceLibrary
 from .reference_separation import DemucsSeparatorBackend, analyze_separated_stems, demucs_capability
 from .reference_stem_compare import compare_stem_analyses
@@ -83,6 +83,14 @@ def main() -> None:
 
     plugins = sub.add_parser("scan-plugins", help="Read installed audio plugin locations without modifying them")
     plugins.add_argument("--root", action="append", default=None, help="Optional plugin root; repeat to scan multiple roots")
+
+    plugin_query = sub.add_parser(
+        "query-plugins",
+        help="Resolve one reviewed production intent against the installed logical plugin inventory",
+    )
+    plugin_query.add_argument("request", help="Reviewed intent name or supported natural-language request")
+    plugin_query.add_argument("--root", action="append", default=None, help="Optional plugin root; repeat to scan multiple roots")
+    plugin_query.add_argument("--limit", type=int, default=12)
 
     places = sub.add_parser("scan-ableton-places", help="Read user Places from Ableton Library.cfg")
     places.add_argument("library_cfg")
@@ -225,6 +233,18 @@ def main() -> None:
         print(json.dumps(command, indent=2, ensure_ascii=False))
     elif args.command == "scan-plugins":
         print(json.dumps(catalog_dict(discover_plugins(args.root)), indent=2, ensure_ascii=False))
+    elif args.command == "query-plugins":
+        print(
+            json.dumps(
+                query_installed_plugins(
+                    discover_plugins(args.root),
+                    args.request,
+                    limit=args.limit,
+                ),
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "scan-ableton-places":
         print(json.dumps(places_dict(read_user_places(args.library_cfg)), indent=2, ensure_ascii=False))
     elif args.command == "live-status":

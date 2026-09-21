@@ -5,7 +5,9 @@ import pytest
 
 pytest.importorskip("mcp")
 
+import chibi_audio.mcp_server as mcp_server_module
 from chibi_audio.mcp_server import AudioMcpSettings, build_mcp_server
+from chibi_audio.plugins import PluginInfo, classify_plugin
 
 
 class FakeFacade:
@@ -111,6 +113,47 @@ def test_status_reports_write_policy_without_mutating(tmp_path):
     result = asyncio.run(server.call_tool("status", {}))
     assert facade.calls == [("status", {})]
     assert result.structured_content["mcp_writes_enabled"] is False
+
+
+def test_plugin_intent_tool_is_read_only_and_inventory_grounded(tmp_path, monkeypatch):
+    facade = FakeFacade()
+    monkeypatch.setattr(
+        mcp_server_module,
+        "discover_plugins",
+        lambda: [
+            PluginInfo(
+                name="StandardCLIP",
+                format="VST3",
+                path="C:/VST3/StandardCLIP.vst3",
+                vendor_hint="SIR Audio Tools",
+                categories=classify_plugin("StandardCLIP"),
+            ),
+            PluginInfo(
+                name="Random Limiter",
+                format="VST3",
+                path="C:/VST3/Random Limiter.vst3",
+                vendor_hint="Example",
+                categories=classify_plugin("Random Limiter"),
+            ),
+        ],
+    )
+    server = build_mcp_server(
+        AudioMcpSettings(artifact_root=tmp_path, allow_writes=False),
+        facade=facade,
+    )
+
+    result = asyncio.run(
+        server.call_tool(
+            "query_installed_plugins",
+            {"request": "what transparent clippers do I own?", "limit": 5},
+        )
+    )
+
+    payload = result.structured_content
+    assert payload["effect_state"] == "NOT_STARTED"
+    assert payload["resolved_intent"] == "transparent_clipping"
+    assert [item["product_name"] for item in payload["candidates"]] == ["StandardCLIP"]
+    assert facade.calls == []
 
 
 def test_write_enabled_master_device_parameter_routes_without_track_index(tmp_path):

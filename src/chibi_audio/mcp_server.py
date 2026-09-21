@@ -13,6 +13,7 @@ from pydantic import Field
 
 from .facade import ChibiAudioFacade, FacadeError
 from .live import LiveBridgeError
+from .plugins import discover_plugins, query_installed_plugins as query_plugin_inventory
 
 TrackIndex = Annotated[int, Field(ge=0, le=10_000, strict=True)]
 ObjectId = Annotated[int, Field(ge=0, strict=True)]
@@ -20,6 +21,7 @@ ObjectName = Annotated[str, Field(min_length=1, max_length=500)]
 SetSignature = Annotated[str, Field(min_length=1, max_length=2_000)]
 RawParameterValue = Annotated[float, Field(allow_inf_nan=False)]
 ArtifactPath = Annotated[str, Field(min_length=1, max_length=2_000)]
+PluginIntentRequest = Annotated[str, Field(min_length=1, max_length=500)]
 TrackIndexList = Annotated[list[TrackIndex], Field(max_length=1_000)]
 DevicePlacement = Literal["track", "master"]
 WorkflowIntent = Literal["organize", "mix", "sidechain", "master"]
@@ -122,6 +124,25 @@ def build_mcp_server(
             result = surface.call("status")
             result["mcp_writes_enabled"] = settings.allow_writes
             return result
+        except Exception as exc:  # noqa: BLE001 - sanitize MCP trust boundary.
+            raise _safe_tool_error(exc) from None
+
+    @server.tool(
+        title="Query installed plugins by reviewed production intent",
+        description=(
+            "Resolve a small reviewed production intent against the local logical plugin inventory. "
+            "Returns only installed products with explicit semantic evidence and caveats. "
+            "This does not contact Ableton or the network and performs no mutation."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def query_installed_plugins(
+        request: PluginIntentRequest,
+        limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 12,
+    ) -> dict[str, Any]:
+        try:
+            return query_plugin_inventory(discover_plugins(), request, limit=limit)
         except Exception as exc:  # noqa: BLE001 - sanitize MCP trust boundary.
             raise _safe_tool_error(exc) from None
 

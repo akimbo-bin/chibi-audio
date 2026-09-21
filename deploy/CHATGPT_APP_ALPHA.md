@@ -59,11 +59,14 @@ After ChatGPT analyzes the tools for the read-only profile, the expected catalog
 - `plan_section_capture`
 - `plan_section_evidence`
 - `list_audio_analyzers`
+- `query_installed_plugins`
 - `analyze_audio`
 - `analyze_capture_manifest`
 - `attribute_master_stress`
 - `attribute_bus_contribution`
 - `compare_analysis_reports`
+
+The read-only `query_installed_plugins` tool scans only the local reviewed VST2/VST3/CLAP inventory, collapses duplicate formats into logical products, and intersects that inventory with a deliberately small curated pilot semantics table. It does not contact Ableton or the network. Unknown intents fail closed; semantic caveats are returned explicitly, and inclusion is not authorization to mutate the Set.
 
 The read-only app must **not** expose any of these effect-producing tools:
 
@@ -107,7 +110,7 @@ For the first alpha:
 3. In ChatGPT's app creation flow, create an internal custom app named **Chibi Audio** (or **Chibi Audio — Read Only** while both profiles coexist).
 4. Configure the MCP connection/authentication using the dedicated tunnel, then use **Analyze tools**.
 5. Compare the analyzed action list against the exact read-only catalog above before creating/publishing the app.
-6. From an ordinary ChatGPT conversation, prove `status`, a project/Locator read, analyzer discovery, and one confined artifact-analysis call.
+6. From an ordinary ChatGPT conversation, prove `status`, a project/Locator read, analyzer discovery, one installed-plugin intent query, and one confined artifact-analysis call.
 7. Keep writes disabled until this ordinary-conversation proof is complete.
 
 The tunnel ID, runtime API key/principal and explicit ChatGPT workspace association are external deployment inputs. This repository deliberately does not invent, discover or store those credentials.

@@ -11,6 +11,8 @@ from urllib.parse import unquote
 
 
 PLUGIN_CATALOG_SCHEMA_VERSION = "chibi-audio-plugin-catalog/v1"
+PLUGIN_INTENT_QUERY_SCHEMA_VERSION = "chibi-audio-plugin-intent-query/v1"
+PLUGIN_SEMANTICS_SOURCE = "chibi-audio-curated-pilot/v1"
 
 WINDOWS_PLUGIN_ROOTS = (
     Path(r"C:\Program Files\Common Files\VST3"),
@@ -62,6 +64,155 @@ PLUGIN_ROLE_CATEGORIES: dict[str, frozenset[str]] = {
     ),
     "modulation": frozenset({"modulation"}),
     "instrument": frozenset({"instrument"}),
+}
+
+
+class PluginIntentError(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class PluginIntentRule:
+    product_key: str
+    confidence: str
+    capabilities: tuple[str, ...]
+    why_candidate: str
+    caveats: tuple[str, ...] = ()
+
+
+PLUGIN_INTENTS: dict[str, dict[str, object]] = {
+    "transparent_clipping": {
+        "aliases": (
+            "transparent clipping",
+            "transparent clipper",
+            "transparent clippers",
+            "clean clipping",
+            "clean clipper",
+            "dedicated clipper",
+        ),
+        "goal": (
+            "Find installed dedicated clipping/peak-control tools that are plausible "
+            "for low-coloration peak shaving when configured conservatively."
+        ),
+        "global_caveats": (
+            "Transparency is a usage goal, not an intrinsic property proved by the plugin name.",
+            "Any candidate still requires level-matched A/B and peak/distortion evidence at the intended settings.",
+        ),
+        "rules": (
+            PluginIntentRule(
+                product_key="standardclip",
+                confidence="high",
+                capabilities=("dedicated_clipping", "peak_control"),
+                why_candidate=(
+                    "Curated pilot semantics identify StandardCLIP as a dedicated clipping/peak-control tool."
+                ),
+                caveats=("Clip mode/amount and oversampling choices can materially change coloration.",),
+            ),
+            PluginIntentRule(
+                product_key="newfangledsaturate",
+                confidence="high",
+                capabilities=("dedicated_clipping", "peak_control"),
+                why_candidate=(
+                    "Curated pilot semantics identify Newfangled Saturate as a dedicated saturation/clipping peak-control tool."
+                ),
+                caveats=("Saturation/clip settings may intentionally add color; transparent use must be verified.",),
+            ),
+            PluginIntentRule(
+                product_key="gclip",
+                confidence="medium",
+                capabilities=("dedicated_clipping", "peak_control"),
+                why_candidate=(
+                    "Curated pilot semantics identify GClip as a dedicated clipping/peak-control tool."
+                ),
+                caveats=("Transparency is setting-dependent and is not inferred from installation alone.",),
+            ),
+        ),
+    },
+    "dynamic_space": {
+        "aliases": (
+            "dynamic space",
+            "dynamically create space",
+            "create space dynamically",
+            "dynamic masking space",
+            "spectral ducking",
+            "frequency selective ducking",
+            "frequency-selective ducking",
+        ),
+        "goal": (
+            "Find installed processors that can support time-varying or frequency-selective "
+            "masking relief, while distinguishing source-aware spectral space from generic dynamic control."
+        ),
+        "global_caveats": (
+            "Installed capability does not prove that the current Live routing exposes the desired sidechain/control path.",
+            "The specific band, source-target relation, depth and timing still require project evidence and bounded A/B verification.",
+        ),
+        "rules": (
+            PluginIntentRule(
+                product_key="trackspacer25",
+                confidence="high",
+                capabilities=("source_aware_spectral_space", "dynamic_masking_relief"),
+                why_candidate=(
+                    "Curated pilot semantics identify Trackspacer as a source-aware spectral-space processor."
+                ),
+                caveats=("Requires a valid source-target routing relationship for source-aware use.",),
+            ),
+            PluginIntentRule(
+                product_key="fabfilterproq3",
+                confidence="high",
+                capabilities=("dynamic_eq", "frequency_selective_control"),
+                why_candidate=(
+                    "Curated pilot semantics identify FabFilter Pro-Q 3 as a dynamic-EQ candidate for selective masking relief."
+                ),
+                caveats=("A dynamic-EQ candidate is not automatically source-aware; verify the intended trigger/routing mode.",),
+            ),
+            PluginIntentRule(
+                product_key="ozone10dynamiceq",
+                confidence="high",
+                capabilities=("dynamic_eq", "frequency_selective_control"),
+                why_candidate=(
+                    "Curated pilot semantics identify Ozone 10 Dynamic EQ as a dynamic-EQ candidate for selective masking relief."
+                ),
+                caveats=("Use as a dynamic-EQ candidate; do not infer external source triggering from inventory alone.",),
+            ),
+            PluginIntentRule(
+                product_key="bxdynEQv2".casefold(),
+                confidence="medium",
+                capabilities=("dynamic_eq", "frequency_selective_control"),
+                why_candidate=(
+                    "Curated pilot semantics identify bx_dynEQ V2 as a dynamic-EQ candidate for selective masking relief."
+                ),
+                caveats=("Verify the exact installed variant and routing before treating it as source-driven.",),
+            ),
+            PluginIntentRule(
+                product_key="soothe2",
+                confidence="medium",
+                capabilities=("dynamic_resonance_control", "spectral_cleanup"),
+                why_candidate=(
+                    "Curated pilot semantics identify soothe2 as dynamic resonance/spectral control that can reduce masking or harsh buildup."
+                ),
+                caveats=("This is not equivalent to source-target spectral ducking by default.",),
+            ),
+        ),
+    },
+}
+
+# Normalize rule keys once, including human-readable literals above.
+PLUGIN_INTENTS = {
+    name: {
+        **definition,
+        "rules": tuple(
+            PluginIntentRule(
+                product_key=logical_key,
+                confidence=rule.confidence,
+                capabilities=rule.capabilities,
+                why_candidate=rule.why_candidate,
+                caveats=rule.caveats,
+            )
+            for rule in definition["rules"]
+            for logical_key in (re.sub(r"[^a-z0-9]+", "", rule.product_key.casefold()),)
+        ),
+    }
+    for name, definition in PLUGIN_INTENTS.items()
 }
 
 _FORMAT_ORDER = {"VST3": 0, "CLAP": 1, "VST2/DLL": 2}
@@ -352,4 +503,125 @@ def catalog_dict(plugins: list[PluginInfo]) -> dict:
             for role in PLUGIN_ROLE_CATEGORIES
         },
         "products": [asdict(product) for product in products],
+    }
+
+
+def supported_plugin_intents() -> list[dict[str, object]]:
+    return [
+        {
+            "intent": name,
+            "goal": str(definition["goal"]),
+            "aliases": list(definition["aliases"]),
+            "global_caveats": list(definition["global_caveats"]),
+        }
+        for name, definition in sorted(PLUGIN_INTENTS.items())
+    ]
+
+
+def resolve_plugin_intent(request: str) -> str:
+    raw = str(request or "").strip()
+    if not raw:
+        raise PluginIntentError("plugin intent request must not be empty")
+    normalized = " ".join(re.sub(r"[^a-z0-9]+", " ", raw.casefold()).split())
+    direct = raw.casefold().strip()
+    if direct in PLUGIN_INTENTS:
+        return direct
+
+    matches: list[str] = []
+    padded = f" {normalized} "
+    for intent, definition in PLUGIN_INTENTS.items():
+        for alias in definition["aliases"]:
+            alias_normalized = " ".join(
+                re.sub(r"[^a-z0-9]+", " ", str(alias).casefold()).split()
+            )
+            if f" {alias_normalized} " in padded:
+                matches.append(intent)
+                break
+    unique = sorted(set(matches))
+    if len(unique) == 1:
+        return unique[0]
+    supported = ", ".join(sorted(PLUGIN_INTENTS))
+    if not unique:
+        raise PluginIntentError(
+            f"unsupported plugin intent request; supported intents: {supported}"
+        )
+    raise PluginIntentError(
+        "plugin intent request is ambiguous across reviewed intents: "
+        + ", ".join(unique)
+    )
+
+
+def query_installed_plugins(
+    plugins: list[PluginInfo],
+    request: str,
+    *,
+    limit: int = 12,
+) -> dict[str, object]:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise PluginIntentError("limit must be an integer between 1 and 50")
+
+    intent = resolve_plugin_intent(request)
+    definition = PLUGIN_INTENTS[intent]
+    products = group_logical_products(plugins)
+    by_key = {product.product_key: product for product in products}
+    candidates: list[dict[str, object]] = []
+
+    confidence_order = {"high": 0, "medium": 1, "low": 2}
+    for rule_order, rule in enumerate(definition["rules"]):
+        product = by_key.get(rule.product_key)
+        if product is None:
+            continue
+        candidates.append(
+            {
+                "product_key": product.product_key,
+                "product_name": product.name,
+                "formats": list(product.formats),
+                "paths": list(product.paths),
+                "vendor_hints": list(product.vendor_hints),
+                "categories": list(product.categories),
+                "roles": list(product.roles),
+                "physical_entry_count": product.entry_count,
+                "confidence": rule.confidence,
+                "capabilities": list(rule.capabilities),
+                "why_candidate": rule.why_candidate,
+                "caveats": [*definition["global_caveats"], *rule.caveats],
+                "evidence": {
+                    "inventory": "installed_logical_product",
+                    "semantics_source": PLUGIN_SEMANTICS_SOURCE,
+                },
+                "_rule_order": rule_order,
+            }
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            confidence_order.get(str(item["confidence"]), 99),
+            int(item["_rule_order"]),
+            str(item["product_name"]).casefold(),
+        )
+    )
+    for rank, item in enumerate(candidates[:limit], start=1):
+        item.pop("_rule_order", None)
+        item["rank"] = rank
+
+    selected = candidates[:limit]
+    return {
+        "schema_version": PLUGIN_INTENT_QUERY_SCHEMA_VERSION,
+        "effect_state": "NOT_STARTED",
+        "request": request,
+        "resolved_intent": intent,
+        "intent_goal": definition["goal"],
+        "global_caveats": list(definition["global_caveats"]),
+        "semantics_source": PLUGIN_SEMANTICS_SOURCE,
+        "inventory": {
+            "physical_entry_count": len(plugins),
+            "logical_product_count": len(products),
+        },
+        "candidate_count": len(selected),
+        "candidates": selected,
+        "interpretation_note": (
+            "Candidates are the intersection of the local installed logical-product inventory "
+            "and a small reviewed pilot semantics table. Absence from this list does not prove "
+            "a plugin lacks the capability, and inclusion does not authorize a Live mutation."
+        ),
     }
