@@ -7,12 +7,16 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 
+from .analysis.contribution import BUS_CONTRIBUTION_ATTRIBUTION_SCHEMA_VERSION
 from .analysis.stress import MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION
 
 
 MIX_WAVE_PLAN_SCHEMA_VERSION = "chibi-audio-mix-wave-plan/v1"
 MASTER_STRESS_WAVE_DERIVATION_SCHEMA_VERSION = (
     "chibi-audio-master-stress-wave-derivation/v1"
+)
+BUS_CONTRIBUTION_WAVE_DERIVATION_SCHEMA_VERSION = (
+    "chibi-audio-bus-contribution-wave-derivation/v1"
 )
 
 _MASTER_STRESS_LEADER_METRICS = (
@@ -21,6 +25,14 @@ _MASTER_STRESS_LEADER_METRICS = (
     ("low_band_correlation_to_stress", "low_band_stress_correlation"),
     ("top_stress_low_band_uplift_db", "low_band_top_stress_uplift"),
     ("top_stress_active_fraction_delta", "top_stress_activity_delta"),
+)
+
+_BUS_CONTRIBUTION_LEADER_METRICS = (
+    ("rms_correlation_to_bus", "full_band_bus_correlation"),
+    ("low_band_correlation_to_bus", "low_band_bus_correlation"),
+    ("top_bus_rms_uplift_db", "top_bus_full_band_uplift"),
+    ("top_bus_low_band_uplift_db", "top_bus_low_band_uplift"),
+    ("top_bus_active_fraction_delta", "top_bus_activity_delta"),
 )
 
 
@@ -646,6 +658,379 @@ def build_mix_wave_from_master_stress(
         },
         "hypothesis_evidence": derivation_rows,
         "stress_event_beats": event_beats,
+        "no_overall_winner": True,
+        "effect_state": "NOT_STARTED",
+    }
+    return plan
+
+
+
+def _load_bus_contribution_capture_manifest(
+    attribution: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    if attribution.get("schema_version") != BUS_CONTRIBUTION_ATTRIBUTION_SCHEMA_VERSION:
+        raise MixWavePlanError(
+            "bus contribution attribution schema_version is unsupported"
+        )
+    reference = attribution.get("capture_manifest")
+    if not isinstance(reference, str) or not reference.strip():
+        raise MixWavePlanError(
+            "bus contribution attribution has no capture_manifest"
+        )
+    path = Path(reference).expanduser().resolve()
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MixWavePlanError(f"could not read capture manifest: {path}") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise MixWavePlanError(
+            "bus contribution capture manifest must use schema_version=1"
+        )
+    return path, manifest
+
+
+def _bus_contribution_metric_groups(
+    attribution: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    leaders = attribution.get("leaders")
+    sources = attribution.get("sources")
+    if not isinstance(leaders, dict) or not isinstance(sources, list):
+        raise MixWavePlanError(
+            "bus contribution attribution requires leaders and sources"
+        )
+    source_rows = {
+        str(row.get("source_label") or ""): row
+        for row in sources
+        if isinstance(row, dict) and str(row.get("source_label") or "")
+    }
+    grouped: dict[str, dict[str, Any]] = {}
+    for metric, dimension in _BUS_CONTRIBUTION_LEADER_METRICS:
+        leader = leaders.get(metric)
+        if leader is None:
+            continue
+        if not isinstance(leader, dict):
+            raise MixWavePlanError(
+                f"bus contribution leader is invalid: {metric}"
+            )
+        source_label = str(leader.get("source_label") or "").strip()
+        raw_value = leader.get("value")
+        if (
+            not source_label
+            or isinstance(raw_value, bool)
+            or not isinstance(raw_value, (int, float))
+            or not math.isfinite(float(raw_value))
+            or float(raw_value) <= 0.0
+        ):
+            raise MixWavePlanError(
+                f"bus contribution leader must have a positive finite value: {metric}"
+            )
+        source_row = source_rows.get(source_label)
+        if source_row is None:
+            raise MixWavePlanError(
+                "bus contribution leader source is missing from sources: "
+                + source_label
+            )
+        source_value = source_row.get(metric)
+        if (
+            isinstance(source_value, bool)
+            or not isinstance(source_value, (int, float))
+            or not math.isfinite(float(source_value))
+            or not math.isclose(
+                float(source_value),
+                float(raw_value),
+                rel_tol=1.0e-9,
+                abs_tol=1.0e-12,
+            )
+        ):
+            raise MixWavePlanError(
+                f"bus contribution leader value disagrees with source row: {metric}"
+            )
+        item = grouped.setdefault(
+            source_label,
+            {
+                "source_row": source_row,
+                "metrics": [],
+            },
+        )
+        item["metrics"].append(
+            {
+                "metric": metric,
+                "dimension": dimension,
+                "value": float(raw_value),
+            }
+        )
+    return grouped
+
+
+def _bus_event_beats(
+    attribution: dict[str, Any],
+    *,
+    capture_start_beat: float,
+    capture_tempo_bpm: float,
+    section_start_beat: float,
+    section_end_beat: float,
+) -> list[float]:
+    block = attribution.get("bus_events")
+    if not isinstance(block, dict):
+        return []
+    events = block.get("events")
+    if not isinstance(events, list):
+        return []
+    result: list[float] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        raw_time = event.get("center_time_s")
+        if (
+            isinstance(raw_time, bool)
+            or not isinstance(raw_time, (int, float))
+            or not math.isfinite(float(raw_time))
+            or float(raw_time) < 0.0
+        ):
+            continue
+        beat = (
+            capture_start_beat
+            + float(raw_time) * capture_tempo_bpm / 60.0
+        )
+        if section_start_beat <= beat <= section_end_beat:
+            result.append(beat)
+    return result
+
+
+def _activity_context(source_row: dict[str, Any]) -> dict[str, float | None]:
+    result: dict[str, float | None] = {}
+    for key in (
+        "active_window_fraction",
+        "active_fraction_within_top_bus",
+        "top_bus_active_fraction_delta",
+    ):
+        raw = source_row.get(key)
+        if (
+            isinstance(raw, (int, float))
+            and not isinstance(raw, bool)
+            and math.isfinite(float(raw))
+        ):
+            result[key] = float(raw)
+        else:
+            result[key] = None
+    return result
+
+
+def build_source_wave_from_bus_contribution(
+    project_snapshot: dict[str, Any],
+    attribution: dict[str, Any],
+    *,
+    section: dict[str, Any] | None = None,
+    evidence_ref: str | None = None,
+    diagnostic_seconds: float = 4.0,
+    max_parallel_workers: int = 4,
+) -> dict[str, Any]:
+    """Derive source follow-up investigators from a completed bus census.
+
+    The reference-bus census is already evidence at this point, so this
+    downstream plan does not schedule another bus census. Metric-specific source
+    evidence remains separate and no Live mutation is authorized.
+    """
+
+    manifest_path, manifest = _load_bus_contribution_capture_manifest(
+        attribution
+    )
+    source_targets = _capture_source_target_map(manifest)
+    metric_groups = _bus_contribution_metric_groups(attribution)
+    if not metric_groups:
+        raise MixWavePlanError(
+            "bus contribution attribution has no positive leader evidence"
+        )
+
+    requested = manifest.get("requested_range")
+    if not isinstance(requested, dict):
+        raise MixWavePlanError("capture manifest has no requested_range")
+    try:
+        capture_start = float(requested["start_beat"])
+        capture_end = float(requested["end_beat"])
+        capture_tempo = float(requested["tempo_bpm"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MixWavePlanError(
+            "capture manifest requested_range is incomplete"
+        ) from exc
+    if capture_end <= capture_start or capture_tempo <= 0.0:
+        raise MixWavePlanError("capture requested range/tempo is invalid")
+
+    selected_section = (
+        dict(section)
+        if section is not None
+        else {
+            "name": str(
+                attribution.get("experiment_id")
+                or manifest.get("experiment_id")
+                or "bus-contribution-section"
+            ),
+            "start_beat": capture_start,
+            "end_beat": capture_end,
+        }
+    )
+    try:
+        section_start = float(selected_section["start_beat"])
+        section_end = float(selected_section["end_beat"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MixWavePlanError(
+            "section requires numeric start_beat/end_beat"
+        ) from exc
+    if section_end <= section_start:
+        raise MixWavePlanError(
+            "section end_beat must be greater than start_beat"
+        )
+
+    base_ref = (
+        str(evidence_ref).strip()
+        if evidence_ref is not None and str(evidence_ref).strip()
+        else (
+            "bus-contribution:"
+            + str(
+                attribution.get("experiment_id")
+                or manifest.get("experiment_id")
+                or manifest_path.stem
+            )
+        )
+    )
+    hypotheses: list[MixHypothesis] = []
+    derivation_rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+
+    for source_label in sorted(metric_groups):
+        item = metric_groups[source_label]
+        target_name = source_targets.get(source_label)
+        if not target_name:
+            blockers.append(
+                f"capture_source_target_missing:{source_label}"
+            )
+            continue
+        metric_rows = item["metrics"]
+        context = _activity_context(item["source_row"])
+        evidence_refs = tuple(
+            f"{base_ref}#leaders/{row['metric']}"
+            for row in metric_rows
+        )
+        evidence_text = ", ".join(
+            f"{row['dimension']}={row['value']:.4g}"
+            for row in metric_rows
+        )
+        context_text = ", ".join(
+            f"{key}={value:.4g}"
+            for key, value in context.items()
+            if value is not None
+        )
+        rationale = (
+            f"{target_name} leads distinct reference-bus evidence dimensions "
+            f"({evidence_text})"
+        )
+        if context_text:
+            rationale += f"; activity context: {context_text}"
+        rationale += (
+            "; investigate this exact source before authorizing any mutation."
+        )
+        hypotheses.append(
+            MixHypothesis(
+                hypothesis_id=(
+                    "bus-contribution-"
+                    + _hypothesis_slug(target_name)
+                ),
+                scope="source",
+                target_names=(target_name,),
+                rationale=rationale,
+                evidence_refs=evidence_refs,
+                priority=100,
+            )
+        )
+        derivation_rows.append(
+            {
+                "source_label": source_label,
+                "target_name": target_name,
+                "scope": "source",
+                "metrics": metric_rows,
+                "activity_context": context,
+                "evidence_refs": list(evidence_refs),
+            }
+        )
+
+    if not hypotheses:
+        raise MixWavePlanError(
+            "bus contribution leaders could not be mapped to captured track targets"
+        )
+
+    snapshot_tempo = float(project_snapshot.get("tempo") or 0.0)
+    tempo_matches = (
+        snapshot_tempo > 0.0
+        and math.isclose(
+            snapshot_tempo,
+            capture_tempo,
+            rel_tol=0.0,
+            abs_tol=1.0e-6,
+        )
+    )
+    event_beats = (
+        _bus_event_beats(
+            attribution,
+            capture_start_beat=capture_start,
+            capture_tempo_bpm=capture_tempo,
+            section_start_beat=section_start,
+            section_end_beat=section_end,
+        )
+        if tempo_matches
+        else []
+    )
+    if not tempo_matches:
+        blockers.append(
+            f"capture_tempo_mismatch:{capture_tempo:g}->{snapshot_tempo:g}"
+        )
+
+    plan = build_mix_wave_plan(
+        project_snapshot,
+        section=selected_section,
+        hypotheses=hypotheses,
+        event_beats=event_beats,
+        diagnostic_seconds=diagnostic_seconds,
+        max_parallel_workers=max_parallel_workers,
+    )
+    combined_blockers = sorted(set([*plan["blockers"], *blockers]))
+    plan["blockers"] = combined_blockers
+    plan["ready_for_parallel_analysis"] = (
+        bool(plan["workers"]) and not combined_blockers
+    )
+
+    source_targets_for_follow_up = [
+        target
+        for worker in plan["workers"]
+        for target in worker["targets"]
+    ]
+    plan["capture_stages"] = [
+        {
+            "stage": "source_follow_up",
+            "reuse_reference_bus_evidence": True,
+            "worker_ids": [
+                worker["worker_id"]
+                for worker in plan["workers"]
+            ],
+            "targets": source_targets_for_follow_up,
+            "range": plan["diagnostic_range"],
+        }
+    ]
+    plan["evidence_derivation"] = {
+        "schema_version": BUS_CONTRIBUTION_WAVE_DERIVATION_SCHEMA_VERSION,
+        "source": "bus_contribution_attribution",
+        "attribution_schema_version": attribution["schema_version"],
+        "capture_manifest": str(manifest_path),
+        "evidence_ref": base_ref,
+        "capture_tempo_bpm": capture_tempo,
+        "reference_bus": attribution.get("reference_bus"),
+        "source_target_map": {
+            source_label: source_targets[source_label]
+            for source_label in metric_groups
+            if source_label in source_targets
+        },
+        "hypothesis_evidence": derivation_rows,
+        "bus_event_beats": event_beats,
+        "reuse_reference_bus_evidence": True,
         "no_overall_winner": True,
         "effect_state": "NOT_STARTED",
     }

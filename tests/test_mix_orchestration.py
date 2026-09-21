@@ -8,10 +8,12 @@ import pytest
 
 from chibi_audio.als import inspect_set
 from chibi_audio.mix_orchestration import (
+    BUS_CONTRIBUTION_WAVE_DERIVATION_SCHEMA_VERSION,
     MASTER_STRESS_WAVE_DERIVATION_SCHEMA_VERSION,
     MixHypothesis,
     MixWavePlanError,
     build_mix_wave_from_master_stress,
+    build_source_wave_from_bus_contribution,
     build_mix_wave_plan,
     project_snapshot_from_saved_set,
 )
@@ -398,3 +400,211 @@ def test_master_stress_wave_rejects_untrusted_leader_value(tmp_path):
 
     with pytest.raises(MixWavePlanError, match="disagrees with source row"):
         build_mix_wave_from_master_stress(snapshot, attribution)
+
+
+def _write_bus_contribution_manifest(tmp_path: Path) -> Path:
+    manifest = tmp_path / "bus-contribution-capture.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "experiment_id": "drums-child-fixture",
+                "requested_range": {
+                    "start_beat": 96.0,
+                    "end_beat": 160.0,
+                    "tempo_bpm": 135.0,
+                },
+                "live_session": {
+                    "mixer_state": {
+                        "tap_targets": [
+                            {
+                                "source_label": "DRUMS_POST",
+                                "track_name": "DRUMS",
+                                "placement": "track",
+                            },
+                            {
+                                "source_label": "DRUMS_CHILD_1",
+                                "track_name": "KICK",
+                                "placement": "track",
+                            },
+                            {
+                                "source_label": "DRUMS_CHILD_2",
+                                "track_name": "SNARE",
+                                "placement": "track",
+                            },
+                        ]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _bus_contribution_attribution(manifest: Path) -> dict:
+    return {
+        "schema_version": "chibi-audio-bus-contribution-attribution/v1",
+        "capture_manifest": str(manifest),
+        "experiment_id": "drums-child-fixture",
+        "effect_state": "NOT_STARTED",
+        "reference_bus": {
+            "source_label": "DRUMS_POST",
+            "track_name": "DRUMS",
+        },
+        "sources": [
+            {
+                "source_label": "DRUMS_CHILD_1",
+                "rms_correlation_to_bus": 0.61,
+                "low_band_correlation_to_bus": 0.52,
+                "top_bus_rms_uplift_db": 4.2,
+                "top_bus_low_band_uplift_db": 5.1,
+                "active_window_fraction": 0.72,
+                "active_fraction_within_top_bus": 1.0,
+                "top_bus_active_fraction_delta": 0.40,
+            },
+            {
+                "source_label": "DRUMS_CHILD_2",
+                "rms_correlation_to_bus": 0.93,
+                "low_band_correlation_to_bus": 0.85,
+                "top_bus_rms_uplift_db": 12.2,
+                "top_bus_low_band_uplift_db": 17.3,
+                "active_window_fraction": 0.06,
+                "active_fraction_within_top_bus": 0.14,
+                "top_bus_active_fraction_delta": 0.08,
+            },
+        ],
+        "leaders": {
+            "rms_correlation_to_bus": {
+                "source_label": "DRUMS_CHILD_2",
+                "value": 0.93,
+            },
+            "low_band_correlation_to_bus": {
+                "source_label": "DRUMS_CHILD_2",
+                "value": 0.85,
+            },
+            "top_bus_rms_uplift_db": {
+                "source_label": "DRUMS_CHILD_2",
+                "value": 12.2,
+            },
+            "top_bus_low_band_uplift_db": {
+                "source_label": "DRUMS_CHILD_2",
+                "value": 17.3,
+            },
+            "top_bus_active_fraction_delta": {
+                "source_label": "DRUMS_CHILD_1",
+                "value": 0.40,
+            },
+        },
+        "bus_events": {
+            "time_reference": "capture_start",
+            "minimum_separation_ms": 250.0,
+            "events": [
+                {"rank": 1, "center_time_s": 4.0, "bus_rms_dbfs": -4.9},
+                {"rank": 2, "center_time_s": 10.0, "bus_rms_dbfs": -5.0},
+            ],
+        },
+        "no_overall_winner": True,
+    }
+
+
+def test_bus_contribution_derives_distinct_source_follow_up_workers(tmp_path):
+    manifest = _write_bus_contribution_manifest(tmp_path)
+    attribution = _bus_contribution_attribution(manifest)
+    snapshot = _snapshot()
+    snapshot["tempo"] = 135.0
+
+    plan = build_source_wave_from_bus_contribution(
+        snapshot,
+        attribution,
+        evidence_ref="artifact:drums-child-census",
+        diagnostic_seconds=4.0,
+    )
+
+    assert plan["effect_state"] == "NOT_STARTED"
+    assert plan["ready_for_parallel_analysis"] is True
+    assert plan["blockers"] == []
+    assert [item["hypothesis_id"] for item in plan["workers"]] == [
+        "bus-contribution-kick",
+        "bus-contribution-snare",
+    ]
+    assert [item["role"] for item in plan["workers"]] == [
+        "source_investigator",
+        "source_investigator",
+    ]
+    assert all(item["child_targets"] == [] for item in plan["workers"])
+    assert all(
+        item["live_mutation_authorized"] is False
+        for item in plan["workers"]
+    )
+    assert "top_bus_activity_delta=0.4" in plan["workers"][0]["rationale"]
+    assert "active_window_fraction=0.72" in plan["workers"][0]["rationale"]
+    assert "full_band_bus_correlation=0.93" in plan["workers"][1]["rationale"]
+    assert "top_bus_full_band_uplift=12.2" in plan["workers"][1]["rationale"]
+    assert "active_window_fraction=0.06" in plan["workers"][1]["rationale"]
+
+    assert plan["diagnostic_range"]["fast_path"] is True
+    assert plan["diagnostic_range"]["anchor_beat"] == pytest.approx(105.0)
+    assert plan["diagnostic_range"]["start_beat"] == pytest.approx(100.5)
+    assert plan["diagnostic_range"]["end_beat"] == pytest.approx(109.5)
+
+    assert len(plan["capture_stages"]) == 1
+    stage = plan["capture_stages"][0]
+    assert stage["stage"] == "source_follow_up"
+    assert stage["reuse_reference_bus_evidence"] is True
+    assert [item["name"] for item in stage["targets"]] == ["KICK", "SNARE"]
+
+    derivation = plan["evidence_derivation"]
+    assert (
+        derivation["schema_version"]
+        == BUS_CONTRIBUTION_WAVE_DERIVATION_SCHEMA_VERSION
+    )
+    assert derivation["reuse_reference_bus_evidence"] is True
+    assert derivation["no_overall_winner"] is True
+    assert derivation["source_target_map"] == {
+        "DRUMS_CHILD_1": "KICK",
+        "DRUMS_CHILD_2": "SNARE",
+    }
+    assert derivation["bus_event_beats"] == pytest.approx([105.0, 118.5])
+    by_target = {
+        item["target_name"]: item
+        for item in derivation["hypothesis_evidence"]
+    }
+    assert {row["dimension"] for row in by_target["KICK"]["metrics"]} == {
+        "top_bus_activity_delta",
+    }
+    assert by_target["KICK"]["activity_context"]["active_window_fraction"] == 0.72
+    assert {row["dimension"] for row in by_target["SNARE"]["metrics"]} == {
+        "full_band_bus_correlation",
+        "low_band_bus_correlation",
+        "top_bus_full_band_uplift",
+        "top_bus_low_band_uplift",
+    }
+    assert by_target["SNARE"]["activity_context"]["active_window_fraction"] == 0.06
+
+
+def test_bus_contribution_wave_refuses_tempo_drift_for_event_anchoring(tmp_path):
+    manifest = _write_bus_contribution_manifest(tmp_path)
+    snapshot = _snapshot()
+    snapshot["tempo"] = 136.0
+
+    plan = build_source_wave_from_bus_contribution(
+        snapshot,
+        _bus_contribution_attribution(manifest),
+    )
+
+    assert plan["ready_for_parallel_analysis"] is False
+    assert plan["evidence_derivation"]["bus_event_beats"] == []
+    assert "capture_tempo_mismatch:135->136" in plan["blockers"]
+    assert plan["diagnostic_range"]["fast_path"] is False
+
+
+def test_bus_contribution_wave_rejects_untrusted_leader_value(tmp_path):
+    manifest = _write_bus_contribution_manifest(tmp_path)
+    attribution = _bus_contribution_attribution(manifest)
+    attribution["leaders"]["rms_correlation_to_bus"]["value"] = 0.99
+    snapshot = _snapshot()
+    snapshot["tempo"] = 135.0
+
+    with pytest.raises(MixWavePlanError, match="disagrees with source row"):
+        build_source_wave_from_bus_contribution(snapshot, attribution)
