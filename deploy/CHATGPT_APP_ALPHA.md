@@ -61,6 +61,8 @@ After ChatGPT analyzes the tools for the read-only profile, the expected catalog
 - `list_audio_analyzers`
 - `analyze_audio`
 - `analyze_capture_manifest`
+- `attribute_master_stress`
+- `attribute_bus_contribution`
 - `compare_analysis_reports`
 
 The read-only app must **not** expose any of these effect-producing tools:
@@ -68,6 +70,8 @@ The read-only app must **not** expose any of these effect-producing tools:
 - track/device setters or rename/color operations;
 - `capture_section`;
 - `capture_section_evidence`;
+- `capture_section_master_stress`;
+- `capture_section_bus_contribution`;
 - `create_level_matched_ab`.
 
 If an unexpected generic shell, filesystem, arbitrary Python/eval, generic Live Object Model caller/setter, raw JSON-RPC, GUI-control or write capability appears, stop the app review rather than publishing it.
@@ -86,6 +90,8 @@ Only after the read-only app has been proven from an ordinary ChatGPT conversati
 - `set_device_parameter`
 - `capture_section`
 - `capture_section_evidence`
+- `capture_section_master_stress`
+- `capture_section_bus_contribution`
 - `create_level_matched_ab`
 
 `create_level_matched_ab` is an artifact-producing action, not a Live mutation. It accepts only artifact-root-relative inputs, refuses overwrite/unaligned pairs, never boosts either variant, never modifies source WAVs, and returns only artifact-root-confined references plus provenance.

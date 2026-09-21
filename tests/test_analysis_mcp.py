@@ -58,6 +58,16 @@ class FakeAnalysisBridge:
         self.calls.append(("stress", manifest, kwargs))
         return {"capture_manifest": manifest, "effect_state": "NOT_STARTED", "sources": []}
 
+    def attribute_capture_bus_contribution(self, manifest, **kwargs):
+        self.calls.append(("bus_contribution", manifest, kwargs))
+        return {
+            "capture_manifest": manifest,
+            "effect_state": "NOT_STARTED",
+            "reference_bus": {"source_label": kwargs["bus_label"]},
+            "sources": [],
+            "leaders": {},
+        }
+
     def compare_reports(self, left, right, **kwargs):
         self.calls.append(("compare", left, right, kwargs))
         return {"direction": "right_minus_left", **kwargs}
@@ -86,6 +96,7 @@ def test_analysis_tools_are_present_and_read_only(tmp_path):
         "analyze_audio",
         "analyze_capture_manifest",
         "attribute_master_stress",
+        "attribute_bus_contribution",
         "compare_analysis_reports",
         "plan_section_evidence",
     ):
@@ -174,6 +185,45 @@ def test_master_stress_tool_is_read_only_and_forwards_explicit_labels(tmp_path):
     )
 
 
+
+def test_bus_contribution_tool_is_read_only_and_forwards_explicit_scope(tmp_path):
+    server, bridge = make_server(tmp_path)
+    catalog = tools(server)
+    assert catalog["attribute_bus_contribution"].annotations.read_only_hint is True
+    assert catalog["attribute_bus_contribution"].annotations.destructive_hint is False
+
+    result = asyncio.run(
+        server.call_tool(
+            "attribute_bus_contribution",
+            {
+                "manifest": "section-captures/drop/manifest.json",
+                "bus_label": "DRUMS_POST",
+                "source_labels": ["KICK", "SNARE"],
+                "window_ms": 80.0,
+                "hop_ms": 10.0,
+                "low_band_hz": 180.0,
+                "active_threshold_dbfs": -50.0,
+                "top_bus_fraction": 0.2,
+            },
+        )
+    )
+    data = result.structured_content
+    assert data["effect_state"] == "NOT_STARTED"
+    assert bridge.calls[-1] == (
+        "bus_contribution",
+        "section-captures/drop/manifest.json",
+        {
+            "bus_label": "DRUMS_POST",
+            "source_labels": ["KICK", "SNARE"],
+            "window_ms": 80.0,
+            "hop_ms": 10.0,
+            "low_band_hz": 180.0,
+            "active_threshold_dbfs": -50.0,
+            "top_bus_fraction": 0.2,
+        },
+    )
+
+
 def test_compare_reports_does_not_reopen_audio(tmp_path):
     server, bridge = make_server(tmp_path)
     left = {"schema_version": "fake/v1", "measurements": {"audio.levels": {"rms_dbfs": -12.0}}}
@@ -198,6 +248,7 @@ def test_read_only_server_still_omits_capture_section(tmp_path):
     catalog = tools(server)
     assert "capture_section" not in catalog
     assert "capture_section_evidence" not in catalog
+    assert "capture_section_bus_contribution" not in catalog
 
 
 def test_plan_section_evidence_combines_locator_capture_and_analysis_without_effects(tmp_path):
@@ -506,3 +557,273 @@ def test_capture_section_master_stress_preserves_confirmed_capture_when_attribut
     assert data["manifest_artifact"] == "section-captures/kiss-stress-fails/capture-manifest.json"
     assert data["analysis_error"] == "Chibi Audio analysis fabric could not safely complete post-capture analysis."
     assert "private attribution implementation failure" not in data["analysis_error"]
+
+
+def test_capture_section_bus_contribution_preflights_layout_before_capture(monkeypatch, tmp_path):
+    calls = []
+
+    def forbidden_capture(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("capture must not start after invalid bus-contribution tap preflight")
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", forbidden_capture)
+    server, _bridge = make_server(tmp_path, allow_writes=True)
+
+    with pytest.raises(Exception, match="bus_label must select the reference bus captured at post_fx"):
+        asyncio.run(
+            server.call_tool(
+                "capture_section_bus_contribution",
+                {
+                    "name": "Intro",
+                    "experiment_id": "bad-bus-layout",
+                    "tap_specs": [
+                        "721:DRUMS_POST:pre_fx:DRUMS",
+                        "722:DRUMS_CHILD_1:KICK",
+                    ],
+                    "bus_label": "DRUMS_POST",
+                    "source_labels": ["DRUMS_CHILD_1"],
+                },
+            )
+        )
+    assert calls == []
+
+    with pytest.raises(Exception, match="bus_label must select a non-master track/group tap"):
+        asyncio.run(
+            server.call_tool(
+                "capture_section_bus_contribution",
+                {
+                    "name": "Intro",
+                    "experiment_id": "bad-main-alias",
+                    "tap_specs": [
+                        "721:DRUMS_POST:main",
+                        "722:DRUMS_CHILD_1:KICK",
+                    ],
+                    "bus_label": "DRUMS_POST",
+                    "source_labels": ["DRUMS_CHILD_1"],
+                },
+            )
+        )
+    assert calls == []
+
+
+def test_capture_section_bus_contribution_rejects_duplicate_physical_source_targets_before_capture(
+    monkeypatch,
+    tmp_path,
+):
+    calls = []
+
+    def forbidden_capture(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("capture must not start after duplicate source-target preflight")
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(section_server, "run_managed_capture_session", forbidden_capture)
+    server, _bridge = make_server(tmp_path, allow_writes=True)
+
+    with pytest.raises(Exception, match="source_labels must select distinct physical track targets"):
+        asyncio.run(
+            server.call_tool(
+                "capture_section_bus_contribution",
+                {
+                    "name": "Intro",
+                    "experiment_id": "duplicate-source-target",
+                    "tap_specs": [
+                        "721:DRUMS_POST:DRUMS",
+                        "722:CHILD_A:KICK",
+                        "723:CHILD_B:KICK",
+                    ],
+                    "bus_label": "DRUMS_POST",
+                    "source_labels": ["CHILD_A", "CHILD_B"],
+                },
+            )
+        )
+    assert calls == []
+
+
+def test_capture_section_bus_contribution_runs_managed_capture_then_attribution(
+    monkeypatch,
+    tmp_path,
+):
+    events = []
+    capture_calls = {}
+
+    class OrderedBusBridge(FakeAnalysisBridge):
+        def attribute_capture_bus_contribution(self, manifest, **kwargs):
+            events.append("attribute")
+            result = super().attribute_capture_bus_contribution(manifest, **kwargs)
+            result["leaders"] = {
+                "rms_correlation_to_bus": {
+                    "source_label": "DRUMS_CHILD_2",
+                    "value": 0.93,
+                }
+            }
+            return result
+
+    def fake_run_managed_capture_session(**kwargs):
+        events.append("capture")
+        capture_calls.update(kwargs)
+        target = (
+            tmp_path
+            / "section-captures"
+            / "drums-bus-proof"
+            / "capture-manifest.json"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {
+                    "initial_set_signature": "sig-sections",
+                    "final_set_signature": "sig-prepared",
+                    "taps": [],
+                },
+            ),
+            restore={
+                "final_set_signature": "sig-sections",
+                "remove_created": True,
+                "actions": [],
+            },
+        )
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(
+        section_server,
+        "run_managed_capture_session",
+        fake_run_managed_capture_session,
+    )
+    bridge = OrderedBusBridge()
+    server, _bridge = make_server(
+        tmp_path,
+        allow_writes=True,
+        bridge=bridge,
+    )
+    catalog = tools(server)
+    assert catalog["capture_section_bus_contribution"].annotations.read_only_hint is False
+    assert catalog["capture_section_bus_contribution"].annotations.destructive_hint is True
+
+    result = asyncio.run(
+        server.call_tool(
+            "capture_section_bus_contribution",
+            {
+                "name": "Intro",
+                "experiment_id": "drums-bus-proof",
+                "tap_specs": [
+                    "721:DRUMS_POST:DRUMS",
+                    "722:DRUMS_CHILD_1:KICK",
+                    "723:DRUMS_CHILD_2:SNARE",
+                ],
+                "bus_label": "DRUMS_POST",
+                "source_labels": ["DRUMS_CHILD_1", "DRUMS_CHILD_2"],
+                "window_ms": 80.0,
+                "hop_ms": 10.0,
+                "low_band_hz": 180.0,
+                "active_threshold_dbfs": -50.0,
+                "top_bus_fraction": 0.2,
+            },
+        )
+    )
+    data = result.structured_content
+    assert events == ["capture", "attribute"]
+    assert capture_calls["expected_set_signature"] == "sig-sections"
+    assert capture_calls["include_analysis"] is False
+    assert capture_calls["remove_created_after"] is True
+    assert [
+        (tap.source_label, tap.signal_point, tap.target)
+        for tap in capture_calls["taps"]
+    ] == [
+        ("DRUMS_POST", "post_fx", "DRUMS"),
+        ("DRUMS_CHILD_1", "post_fx", "KICK"),
+        ("DRUMS_CHILD_2", "post_fx", "SNARE"),
+    ]
+    assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["analysis_state"] == "COMPLETED"
+    assert data["analysis_error"] is None
+    assert data["manifest_artifact"] == (
+        "section-captures/drums-bus-proof/capture-manifest.json"
+    )
+    assert data["analysis"]["leaders"]["rms_correlation_to_bus"]["value"] == 0.93
+    assert bridge.calls[-1] == (
+        "bus_contribution",
+        data["manifest_artifact"],
+        data["attribution_request"],
+    )
+
+
+def test_capture_section_bus_contribution_preserves_confirmed_capture_when_analysis_fails(
+    monkeypatch,
+    tmp_path,
+):
+    class FailingBusBridge(FakeAnalysisBridge):
+        def attribute_capture_bus_contribution(self, manifest, **kwargs):
+            raise RuntimeError("private bus-contribution implementation failure")
+
+    def fake_run_managed_capture_session(**kwargs):
+        target = (
+            tmp_path
+            / "section-captures"
+            / "drums-bus-fails"
+            / "capture-manifest.json"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=target,
+            topology=SimpleNamespace(
+                final_set_signature="sig-prepared",
+                as_dict=lambda: {
+                    "initial_set_signature": "sig-sections",
+                    "final_set_signature": "sig-prepared",
+                    "taps": [],
+                },
+            ),
+            restore={
+                "final_set_signature": "sig-sections",
+                "remove_created": True,
+                "actions": [],
+            },
+        )
+
+    import chibi_audio.mcp_server_sections as section_server
+
+    monkeypatch.setattr(
+        section_server,
+        "run_managed_capture_session",
+        fake_run_managed_capture_session,
+    )
+    server, _bridge = make_server(
+        tmp_path,
+        allow_writes=True,
+        bridge=FailingBusBridge(),
+    )
+    result = asyncio.run(
+        server.call_tool(
+            "capture_section_bus_contribution",
+            {
+                "name": "Intro",
+                "experiment_id": "drums-bus-fails",
+                "tap_specs": [
+                    "721:DRUMS_POST:DRUMS",
+                    "722:DRUMS_CHILD_1:KICK",
+                ],
+                "bus_label": "DRUMS_POST",
+                "source_labels": ["DRUMS_CHILD_1"],
+            },
+        )
+    )
+    data = result.structured_content
+    assert data["effect_state"] == "STARTED_CONFIRMED"
+    assert data["analysis_state"] == "FAILED"
+    assert data["analysis"] is None
+    assert data["manifest_artifact"] == (
+        "section-captures/drums-bus-fails/capture-manifest.json"
+    )
+    assert data["analysis_error"] == (
+        "Chibi Audio analysis fabric could not safely complete post-capture analysis."
+    )
+    assert "private bus-contribution implementation failure" not in data["analysis_error"]

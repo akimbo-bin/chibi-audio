@@ -142,6 +142,34 @@ class AnalysisFabricBridge:
         result["capture_manifest"] = source.relative_to(self.artifact_root).as_posix()
         return result
 
+    def attribute_capture_bus_contribution(
+        self,
+        manifest: str,
+        *,
+        bus_label: str,
+        source_labels: Iterable[str],
+        window_ms: float = 100.0,
+        hop_ms: float = 10.0,
+        low_band_hz: float = 250.0,
+        active_threshold_dbfs: float = -45.0,
+        top_bus_fraction: float = 0.10,
+    ) -> dict[str, Any]:
+        module = self._require_module()
+        source = self._resolve_artifact(manifest)
+        self._validate_manifest_artifacts(source)
+        result = module.attribute_capture_bus_contribution(
+            source,
+            bus_label=bus_label,
+            source_labels=tuple(source_labels),
+            window_ms=window_ms,
+            hop_ms=hop_ms,
+            low_band_hz=low_band_hz,
+            active_threshold_dbfs=active_threshold_dbfs,
+            top_bus_fraction=top_bus_fraction,
+        )
+        result["capture_manifest"] = source.relative_to(self.artifact_root).as_posix()
+        return result
+
     def compare_reports(
         self,
         left: dict[str, Any],
