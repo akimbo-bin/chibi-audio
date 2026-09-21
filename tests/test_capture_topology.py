@@ -59,10 +59,15 @@ class FakeReadClient:
     def __init__(self, world):
         self.world = world
         self.summary_calls = []
+        self.status_calls = 0
 
     def set_summary(self, **_kwargs):
         self.summary_calls.append(self.world.signature)
         return self.world.summary()
+
+    def status(self):
+        self.status_calls += 1
+        return {"main_thread": {"in_flight_method": None}}
 
     def call(self, method, params):
         device_id = int((params.get("ref") or {}).get("id", 0))
@@ -96,6 +101,8 @@ class FakeCaptureClient:
         self.remove_calls = []
         self.operation_timeouts = []
         self.fail_after_config_once = False
+        self.fail_after_setup_once = False
+        self.fail_before_setup_once = False
 
     def _guard(self, expected_set_signature):
         if expected_set_signature != self.world.signature:
@@ -135,6 +142,11 @@ class FakeCaptureClient:
         signal_point = kwargs["signal_point"]
         self.setup_calls.append((signal_point, kwargs["expected_set_signature"]))
         self.operation_timeouts.append(("setup", kwargs.get("operation_timeout")))
+        if self.fail_before_setup_once:
+            self.fail_before_setup_once = False
+            raise RuntimeError(
+                "Live bridge error: Timed out waiting for Live main thread during chibitap_setup after 90s"
+            )
         index = self.world.expected_index(signal_point)
         ids = self.world.track["devices"]
         if 0 <= index < len(ids):
@@ -156,6 +168,11 @@ class FakeCaptureClient:
         else:
             self.world.track["devices"].insert(index, device_id)
         self.world.version += 1
+        if self.fail_after_setup_once:
+            self.fail_after_setup_once = False
+            raise RuntimeError(
+                "Live bridge error: Timed out waiting for Live main thread during chibitap_setup after 90s"
+            )
         return self._setup_result(device_id, signal_point, True)
 
     def configure_chibitap(self, **kwargs):
@@ -321,3 +338,59 @@ def test_restore_can_retain_created_taps_while_restoring_reused_ids():
     assert world.track["devices"] == [1000, 10, 20]
     assert world.devices[1000]["tap_id"] == 2
     assert world.devices[20]["tap_id"] == 99
+
+
+def test_prepare_reconciles_timed_out_setup_after_device_creation():
+    world = FakeWorld()
+    reader = FakeReadClient(world)
+    capture = FakeCaptureClient(world)
+    capture.fail_after_setup_once = True
+
+    lease = prepare_capture_topology(
+        [CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx")],
+        expected_set_signature="sig-0",
+        read_client=reader,
+        capture_client=capture,
+    )
+
+    assert reader.status_calls >= 1
+    assert lease.initial_set_signature == "sig-0"
+    assert lease.final_set_signature == "sig-1"
+    assert len(lease.taps) == 1
+    tap = lease.taps[0]
+    assert tap.created is True
+    assert tap.device_id == 1000
+    assert tap.device_index == 0
+    assert tap.prior_tap_id == 0
+    assert tap.tap_id_changed is True
+    assert world.devices[1000]["tap_id"] == 2
+
+    restored = restore_capture_topology(
+        lease,
+        read_client=reader,
+        capture_client=capture,
+    )
+    assert restored["final_set_signature"] == "sig-2"
+    assert world.track["devices"] == [10, 20]
+    assert 1000 not in world.devices
+
+
+def test_prepare_timeout_without_effect_fails_closed_and_leaves_topology_unchanged():
+    world = FakeWorld()
+    reader = FakeReadClient(world)
+    capture = FakeCaptureClient(world)
+    capture.fail_before_setup_once = True
+
+    with pytest.raises(CaptureError, match="did not settle at pre_fx"):
+        prepare_capture_topology(
+            [CaptureSessionTap(2, "BASS_PRE", "BASS", "pre_fx")],
+            expected_set_signature="sig-0",
+            read_client=reader,
+            capture_client=capture,
+        )
+
+    assert reader.status_calls >= 1
+    assert world.signature == "sig-0"
+    assert world.track["devices"] == [10, 20]
+    assert capture.configure_calls == []
+    assert capture.remove_calls == []
