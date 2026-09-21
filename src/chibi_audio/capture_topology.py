@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import time
 from typing import Any, Iterable
 
 from .capture import CaptureError
@@ -10,6 +11,8 @@ from .live import LiveBridgeClient, LiveCaptureClient
 
 TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS = 90.0
 TOPOLOGY_TRANSPORT_TIMEOUT_SECONDS = 100.0
+TOPOLOGY_RECONCILIATION_TIMEOUT_SECONDS = 60.0
+TOPOLOGY_RECONCILIATION_POLL_SECONDS = 0.25
 
 
 @dataclass(slots=True)
@@ -160,6 +163,182 @@ def _observed_tap_id(read_client: LiveBridgeClient, device_id: int) -> tuple[int
         raise CaptureError(f"ChibiTap device {device_id} Tap ID is unreadable during restore") from exc
 
 
+
+def _target_track_from_context(
+    summary: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if context["placement"] == "master":
+        track = summary.get("master_track") or {}
+    else:
+        matches = [
+            track
+            for track in (summary.get("tracks") or [])
+            if track.get("id") == context["track_id"]
+            and track.get("name") == context["track_name"]
+        ]
+        if len(matches) != 1:
+            raise CaptureError(
+                f"Live target identity changed while reconciling {context['track_name']!r}"
+            )
+        track = matches[0]
+    if track.get("id") != context["track_id"] or str(track.get("name") or "") != context["track_name"]:
+        raise CaptureError(
+            f"Live target identity changed while reconciling {context['track_name']!r}"
+        )
+    return track
+
+
+def _summary_devices(track: dict[str, Any]) -> list[dict[str, Any]]:
+    devices = [
+        item
+        for item in (track.get("devices") or [])
+        if isinstance(item, dict) and not item.get("truncated")
+    ]
+    if any(item.get("id") is None for item in devices):
+        raise CaptureError("Live device summary is missing object identity during setup reconciliation")
+    return devices
+
+
+def _device_type(read_client: LiveBridgeClient, device_id: int) -> int:
+    detail = read_client.call(
+        "get",
+        {"ref": {"id": int(device_id)}, "properties": ["type"]},
+    )
+    try:
+        return int((detail.get("properties") or {})["type"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CaptureError(
+            f"Live device {device_id} did not expose a readable type during setup reconciliation"
+        ) from exc
+
+
+def _expected_signal_point_index(
+    read_client: LiveBridgeClient,
+    track: dict[str, Any],
+    signal_point: str,
+) -> int:
+    devices = _summary_devices(track)
+    if not devices:
+        raise CaptureError("target track has no devices after timed-out ChibiTap setup")
+    if signal_point == "post_fx":
+        return len(devices) - 1
+    if signal_point == "pre_fx":
+        for index, device in enumerate(devices):
+            if _device_type(read_client, int(device["id"])) == 2:
+                return index
+        raise CaptureError("could not locate an audio-effect boundary after timed-out ChibiTap setup")
+    if signal_point == "post_instrument":
+        instruments = [
+            index
+            for index, device in enumerate(devices)
+            if _device_type(read_client, int(device["id"])) == 1
+        ]
+        if len(instruments) != 1:
+            raise CaptureError(
+                f"post_instrument reconciliation requires exactly one instrument; found {len(instruments)}"
+            )
+        return instruments[0] + 1
+    raise CaptureError(f"unsupported ChibiTap signal point during reconciliation: {signal_point!r}")
+
+
+def _is_setup_main_thread_timeout(exc: Exception) -> bool:
+    return "Timed out waiting for Live main thread during chibitap_setup" in str(exc)
+
+
+def _wait_for_main_thread_idle(read_client: LiveBridgeClient) -> None:
+    deadline = time.monotonic() + TOPOLOGY_RECONCILIATION_TIMEOUT_SECONDS
+    while True:
+        status = read_client.status()
+        main_thread = status.get("main_thread") or {}
+        if main_thread.get("in_flight_method") is None:
+            return
+        if time.monotonic() >= deadline:
+            raise CaptureError(
+                "timed-out ChibiTap setup did not settle before reconciliation deadline"
+            )
+        time.sleep(TOPOLOGY_RECONCILIATION_POLL_SECONDS)
+
+
+def _reconcile_timed_out_setup(
+    read_client: LiveBridgeClient,
+    spec: CaptureSessionTap,
+    context: dict[str, Any],
+    before_summary: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Recover exact setup provenance after the bridge timed out post-effect.
+
+    The main-thread operation is allowed to finish, then the exact target is
+    re-read. Recovery succeeds only when the desired signal point contains one
+    unambiguous ChibiTap and the target gained no unexplained devices.
+    """
+
+    _wait_for_main_thread_idle(read_client)
+    after_summary, after_signature = _current_signature(read_client)
+    before_track = _target_track_from_context(before_summary, context)
+    after_track = _target_track_from_context(after_summary, context)
+    before_devices = _summary_devices(before_track)
+    after_devices = _summary_devices(after_track)
+    before_ids = {int(item["id"]) for item in before_devices}
+    after_ids = {int(item["id"]) for item in after_devices}
+    new_ids = after_ids - before_ids
+
+    expected_index = _expected_signal_point_index(
+        read_client,
+        after_track,
+        spec.signal_point,
+    )
+    if expected_index < 0 or expected_index >= len(after_devices):
+        raise CaptureError(
+            f"timed-out ChibiTap setup resolved outside the target device chain for {spec.target!r}"
+        )
+    selected = after_devices[expected_index]
+    if str(selected.get("name") or "") != "ChibiTap":
+        raise CaptureError(
+            f"timed-out ChibiTap setup did not settle at {spec.signal_point} on {spec.target!r}"
+        )
+    device_id = int(selected["id"])
+
+    if device_id in before_ids:
+        if new_ids:
+            raise CaptureError(
+                f"timed-out ChibiTap setup added unexplained devices on {spec.target!r}"
+            )
+        created = False
+    else:
+        if new_ids != {device_id}:
+            raise CaptureError(
+                f"timed-out ChibiTap setup could not identify exactly one new device on {spec.target!r}"
+            )
+        created = True
+
+    prior_tap_id, capture_on = _observed_tap_id(read_client, device_id)
+    if capture_on:
+        raise CaptureError(
+            f"timed-out ChibiTap setup left Capture On for {spec.target!r}"
+        )
+    return (
+        {
+            "loaded": created,
+            "reconciled_after_timeout": True,
+            "signal_point": spec.signal_point,
+            "device_index": expected_index,
+            "track": {
+                "id": context["track_id"],
+                "name": context["track_name"],
+            },
+            "device": {"id": device_id, "name": "ChibiTap"},
+            "parameters": {
+                "Capture": {"value": 0.0, "display": "Off"},
+                "Tap ID": {"display": str(prior_tap_id)},
+                "tap_id_integer": prior_tap_id,
+            },
+        },
+        after_summary,
+        after_signature,
+    )
+
+
 def prepare_capture_topology(
     taps: Iterable[CaptureSessionTap],
     *,
@@ -199,11 +378,24 @@ def prepare_capture_topology(
         for spec in specs:
             context = _target_context(summary, spec)
             target_kwargs = _target_kwargs(context, spec.signal_point)
-            setup = capture.setup_chibitap(
-                **target_kwargs,
-                expected_set_signature=current_signature,
-                operation_timeout=TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS,
-            )
+            before_setup_summary = summary
+            setup_reconciled = False
+            try:
+                setup = capture.setup_chibitap(
+                    **target_kwargs,
+                    expected_set_signature=current_signature,
+                    operation_timeout=TOPOLOGY_MAIN_THREAD_TIMEOUT_SECONDS,
+                )
+            except Exception as setup_exc:
+                if not _is_setup_main_thread_timeout(setup_exc):
+                    raise
+                setup, summary, current_signature = _reconcile_timed_out_setup(
+                    reader,
+                    spec,
+                    context,
+                    before_setup_summary,
+                )
+                setup_reconciled = True
             device_id, device_index, prior_tap_id, created = _verify_setup_result(spec, context, setup)
             provisional = PreparedTopologyTap(
                 tap_id=spec.tap_id,
@@ -226,7 +418,8 @@ def prepare_capture_topology(
                 )
             used_device_ids.add(device_id)
 
-            summary, current_signature = _current_signature(reader)
+            if not setup_reconciled:
+                summary, current_signature = _current_signature(reader)
             if prior_tap_id != spec.tap_id:
                 capture.configure_chibitap(
                     **target_kwargs,
