@@ -64,6 +64,7 @@ After ChatGPT analyzes the tools for the read-only profile, the expected catalog
 - `analyze_capture_manifest`
 - `attribute_master_stress`
 - `attribute_bus_contribution`
+- `evaluate_source_intervention_probe`
 - `compare_analysis_reports`
 
 The read-only `query_installed_plugins` tool scans only the local reviewed VST2/VST3/CLAP inventory, collapses duplicate formats into logical products, and intersects that inventory with a deliberately small curated pilot semantics table. It does not contact Ableton or the network. Unknown intents fail closed; semantic caveats are returned explicitly, and inclusion is not authorization to mutate the Set.

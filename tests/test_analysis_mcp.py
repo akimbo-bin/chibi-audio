@@ -68,6 +68,16 @@ class FakeAnalysisBridge:
             "leaders": {},
         }
 
+    def evaluate_source_intervention_probe(self, baseline, candidate, **kwargs):
+        self.calls.append(("intervention", baseline, candidate, kwargs))
+        return {
+            "schema_version": "source-intervention/v1",
+            "effect_state": "NOT_STARTED",
+            "baseline_capture": {"manifest": baseline},
+            "candidate_capture": {"manifest": candidate},
+            "response": {"top_bus_response_per_declared_db": 1.0},
+        }
+
     def compare_reports(self, left, right, **kwargs):
         self.calls.append(("compare", left, right, kwargs))
         return {"direction": "right_minus_left", **kwargs}
@@ -97,6 +107,7 @@ def test_analysis_tools_are_present_and_read_only(tmp_path):
         "analyze_capture_manifest",
         "attribute_master_stress",
         "attribute_bus_contribution",
+        "evaluate_source_intervention_probe",
         "compare_analysis_reports",
         "plan_section_evidence",
     ):
@@ -215,6 +226,49 @@ def test_bus_contribution_tool_is_read_only_and_forwards_explicit_scope(tmp_path
         {
             "bus_label": "DRUMS_POST",
             "source_labels": ["KICK", "SNARE"],
+            "window_ms": 80.0,
+            "hop_ms": 10.0,
+            "low_band_hz": 180.0,
+            "active_threshold_dbfs": -50.0,
+            "top_bus_fraction": 0.2,
+        },
+    )
+
+
+def test_source_intervention_tool_is_read_only_and_forwards_exact_scope(tmp_path):
+    server, bridge = make_server(tmp_path)
+    catalog = tools(server)
+    assert catalog["evaluate_source_intervention_probe"].annotations.read_only_hint is True
+    assert catalog["evaluate_source_intervention_probe"].annotations.destructive_hint is False
+
+    result = asyncio.run(
+        server.call_tool(
+            "evaluate_source_intervention_probe",
+            {
+                "baseline_manifest": "section-captures/base/manifest.json",
+                "candidate_manifest": "section-captures/candidate/manifest.json",
+                "bus_label": "DRUMS_POST",
+                "source_target": "61-demucs-drums",
+                "source_parameter": "track_volume",
+                "declared_change_db": -1.0,
+                "window_ms": 80.0,
+                "hop_ms": 10.0,
+                "low_band_hz": 180.0,
+                "active_threshold_dbfs": -50.0,
+                "top_bus_fraction": 0.2,
+            },
+        )
+    )
+    assert result.structured_content["effect_state"] == "NOT_STARTED"
+    assert bridge.calls[-1] == (
+        "intervention",
+        "section-captures/base/manifest.json",
+        "section-captures/candidate/manifest.json",
+        {
+            "bus_label": "DRUMS_POST",
+            "source_target": "61-demucs-drums",
+            "source_parameter": "track_volume",
+            "declared_change_db": -1.0,
             "window_ms": 80.0,
             "hop_ms": 10.0,
             "low_band_hz": 180.0,
