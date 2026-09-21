@@ -4,6 +4,11 @@ from .alignment import (
     align_capture_events,
 )
 from .comparison import COMPARISON_SCHEMA_VERSION, compare_reports
+from .contribution import (
+    BUS_CONTRIBUTION_ATTRIBUTION_SCHEMA_VERSION,
+    BusContributionAttributionError,
+    attribute_capture_bus_contribution,
+)
 from .manifest import CaptureManifestAnalysisError, analyze_capture_manifest
 from .models import (
     BASIC_CAPABILITIES,
@@ -37,6 +42,7 @@ __all__ = [
     "ALIGNMENT_SCHEMA_VERSION",
     "BASIC_CAPABILITIES",
     "COMPARISON_SCHEMA_VERSION",
+    "BUS_CONTRIBUTION_ATTRIBUTION_SCHEMA_VERSION",
     "SAMPLE_SIMILARITY_SCHEMA_VERSION",
     "MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION",
     "SCHEMA_VERSION",
@@ -52,11 +58,13 @@ __all__ = [
     "AudioAnalysisService",
     "CaptureEventAlignmentError",
     "CaptureManifestAnalysisError",
+    "BusContributionAttributionError",
     "CaptureSpectralOverlapError",
     "SampleSimilarityError",
     "MasterStressAttributionError",
     "align_capture_events",
     "analyze_capture_manifest",
+    "attribute_capture_bus_contribution",
     "attribute_capture_master_stress",
     "compare_capture_spectral_overlap",
     "compare_capture_spectral_overlap_timeline",
