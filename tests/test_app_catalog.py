@@ -17,6 +17,7 @@ READ_ONLY_TOOLS = {
     "analyze_harshness_artifact",
     "attribute_master_stress",
     "attribute_bus_contribution",
+    "evaluate_source_intervention_probe",
     "compare_analysis_reports",
     "device_parameters",
     "diff_parameter_snapshots",

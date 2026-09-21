@@ -9,6 +9,11 @@ from .contribution import (
     BusContributionAttributionError,
     attribute_capture_bus_contribution,
 )
+from .intervention import (
+    SOURCE_INTERVENTION_PROBE_SCHEMA_VERSION,
+    SourceInterventionProbeError,
+    evaluate_source_intervention_probe,
+)
 from .manifest import CaptureManifestAnalysisError, analyze_capture_manifest
 from .models import (
     BASIC_CAPABILITIES,
@@ -44,6 +49,7 @@ __all__ = [
     "COMPARISON_SCHEMA_VERSION",
     "BUS_CONTRIBUTION_ATTRIBUTION_SCHEMA_VERSION",
     "SAMPLE_SIMILARITY_SCHEMA_VERSION",
+    "SOURCE_INTERVENTION_PROBE_SCHEMA_VERSION",
     "MASTER_STRESS_ATTRIBUTION_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SPECTRAL_OVERLAP_SCHEMA_VERSION",
@@ -61,6 +67,7 @@ __all__ = [
     "BusContributionAttributionError",
     "CaptureSpectralOverlapError",
     "SampleSimilarityError",
+    "SourceInterventionProbeError",
     "MasterStressAttributionError",
     "align_capture_events",
     "analyze_capture_manifest",
@@ -69,5 +76,6 @@ __all__ = [
     "compare_capture_spectral_overlap",
     "compare_capture_spectral_overlap_timeline",
     "compare_reports",
+    "evaluate_source_intervention_probe",
     "rank_sample_similarity",
 ]

@@ -102,9 +102,12 @@ With default read-only startup, the server exposes production reads/evidence too
 - `analyze_capture_manifest`;
 - `attribute_master_stress`;
 - `attribute_bus_contribution`;
+- `evaluate_source_intervention_probe`;
 - `compare_analysis_reports`.
 
 `query_installed_plugins` is local/read-only plugin intelligence. It reports only installed logical products that match reviewed pilot semantics, preserves formats/vendor and evidence/caveat fields, and fails closed for unsupported intents. It performs no web lookup, Live call, plugin insertion or filesystem mutation.
+
+The read-only source-intervention probe compares the same finalized bus range before/after a declared bounded source change and reports baseline-defined active/top-bus response plus response per declared dB. Capture artifacts and bus identity are verified; the mutation declaration remains caller-supplied until bound to experiment-journal provenance, so the tool never upgrades that declaration into mutation authority or a subjective quality judgment.
 
 The reusable-analysis tools are a thin seam to the separately owned issue #8 analysis fabric. If that package is absent from the deployed checkout/runtime, `list_audio_analyzers` reports it unavailable and analysis requests fail closed. When #8 is present, callers explicitly select only the capabilities they need and a `CHEAP`, `MODERATE` or `EXPENSIVE` cost ceiling. The MCP adapter keeps direct artifacts, capture manifests and every finalized tap path confined below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 
@@ -134,8 +137,9 @@ After the tunnel profile is connected to the intended ChatGPT workspace:
 14. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 15. Call `capture_section_evidence` with a small explicit capability set/cost ceiling and require `effect_state=STARTED_CONFIRMED`, `analysis_state=COMPLETED`, the validated `analysis_plan`, and artifact-relative analysis results. If analysis fails after capture, require the response to preserve the confirmed capture/restore/manifest state with `analysis_state=FAILED`.
 16. On an already-finalized reference-bus/source capture, call `attribute_bus_contribution` and require `effect_state=NOT_STARTED`, artifact-relative manifest provenance, metric-specific leaders, and no overall winner.
-17. When a fresh bounded proof is needed, call `capture_section_bus_contribution` with one post-FX non-master bus tap plus distinct post-FX source taps; require exact topology restore, `effect_state=STARTED_CONFIRMED`, and `analysis_state=COMPLETED`.
-18. Call `create_level_matched_ab` on two already-aligned finalized artifacts and require `effect_type=artifact_creation`, `effect_state=STARTED_CONFIRMED`, zero positive gain, and only artifact-root-relative output references.
+17. Call `evaluate_source_intervention_probe` on same-range baseline/candidate bus manifests and require `effect_state=NOT_STARTED`, exact bus-identity agreement, response-per-declared-dB evidence, and an explicit unverified mutation-provenance flag.
+18. When a fresh bounded proof is needed, call `capture_section_bus_contribution` with one post-FX non-master bus tap plus distinct post-FX source taps; require exact topology restore, `effect_state=STARTED_CONFIRMED`, and `analysis_state=COMPLETED`.
+19. Call `create_level_matched_ab` on two already-aligned finalized artifacts and require `effect_type=artifact_creation`, `effect_state=STARTED_CONFIRMED`, zero positive gain, and only artifact-root-relative output references.
 
 Stop if the tool list contains an unexpected generic capability, Live is reachable on a non-loopback interface, analysis can escape the configured artifact root, the tunnel launches a different checkout, or a write-enabled surface appears without the explicit launcher flag.
 

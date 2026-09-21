@@ -170,6 +170,51 @@ class AnalysisFabricBridge:
         result["capture_manifest"] = source.relative_to(self.artifact_root).as_posix()
         return result
 
+    def evaluate_source_intervention_probe(
+        self,
+        baseline_manifest: str,
+        candidate_manifest: str,
+        *,
+        bus_label: str,
+        source_target: str,
+        source_parameter: str,
+        declared_change_db: float,
+        window_ms: float = 100.0,
+        hop_ms: float = 10.0,
+        low_band_hz: float = 250.0,
+        active_threshold_dbfs: float = -45.0,
+        top_bus_fraction: float = 0.10,
+    ) -> dict[str, Any]:
+        module = self._require_module()
+        baseline = self._resolve_artifact(baseline_manifest)
+        candidate = self._resolve_artifact(candidate_manifest)
+        self._validate_manifest_artifacts(baseline)
+        self._validate_manifest_artifacts(candidate)
+        result = module.evaluate_source_intervention_probe(
+            baseline,
+            candidate,
+            bus_label=bus_label,
+            source_target=source_target,
+            source_parameter=source_parameter,
+            declared_change_db=declared_change_db,
+            window_ms=window_ms,
+            hop_ms=hop_ms,
+            low_band_hz=low_band_hz,
+            active_threshold_dbfs=active_threshold_dbfs,
+            top_bus_fraction=top_bus_fraction,
+        )
+        baseline_capture = result.get("baseline_capture")
+        if isinstance(baseline_capture, dict):
+            baseline_capture["manifest"] = baseline.relative_to(
+                self.artifact_root
+            ).as_posix()
+        candidate_capture = result.get("candidate_capture")
+        if isinstance(candidate_capture, dict):
+            candidate_capture["manifest"] = candidate.relative_to(
+                self.artifact_root
+            ).as_posix()
+        return result
+
     def compare_reports(
         self,
         left: dict[str, Any],

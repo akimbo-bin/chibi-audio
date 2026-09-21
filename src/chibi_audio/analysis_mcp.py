@@ -20,6 +20,7 @@ AnalysisPositiveMs = Annotated[float, Field(gt=0.0, le=5000.0, allow_inf_nan=Fal
 AnalysisLowBandHz = Annotated[float, Field(ge=20.0, le=20000.0, allow_inf_nan=False)]
 AnalysisDbfsThreshold = Annotated[float, Field(ge=-160.0, le=0.0, allow_inf_nan=False)]
 AnalysisFraction = Annotated[float, Field(ge=0.01, le=0.5, allow_inf_nan=False)]
+AnalysisChangeDb = Annotated[float, Field(ge=-24.0, le=24.0, allow_inf_nan=False)]
 AnalysisArtifact = Annotated[str, Field(min_length=1, max_length=2000)]
 AnalysisReportPayload = dict[str, Any]
 
@@ -179,6 +180,48 @@ def register_analysis_tools(
             raise _safe_analysis_error(exc) from None
 
     @server.tool(
+        title="Evaluate one source intervention against a reference bus",
+        description=(
+            "Compare the same finalized bus capture range before and after one declared source intervention. "
+            "Returns baseline-defined active/top-bus response, event-local deltas and response per declared dB. "
+            "The capture evidence is verified and confined, while the source mutation declaration remains "
+            "caller-supplied until separately bound to experiment-journal provenance. This is read-only evidence "
+            "and never authorizes an Ableton mutation."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def evaluate_source_intervention_probe(
+        baseline_manifest: AnalysisArtifact,
+        candidate_manifest: AnalysisArtifact,
+        bus_label: AnalysisLabel,
+        source_target: AnalysisLabel,
+        source_parameter: AnalysisLabel,
+        declared_change_db: AnalysisChangeDb,
+        window_ms: AnalysisPositiveMs = 100.0,
+        hop_ms: AnalysisPositiveMs = 10.0,
+        low_band_hz: AnalysisLowBandHz = 250.0,
+        active_threshold_dbfs: AnalysisDbfsThreshold = -45.0,
+        top_bus_fraction: AnalysisFraction = 0.10,
+    ) -> dict[str, Any]:
+        try:
+            return analysis.evaluate_source_intervention_probe(
+                baseline_manifest,
+                candidate_manifest,
+                bus_label=bus_label,
+                source_target=source_target,
+                source_parameter=source_parameter,
+                declared_change_db=declared_change_db,
+                window_ms=window_ms,
+                hop_ms=hop_ms,
+                low_band_hz=low_band_hz,
+                active_threshold_dbfs=active_threshold_dbfs,
+                top_bus_fraction=top_bus_fraction,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _safe_analysis_error(exc) from None
+
+    @server.tool(
         title="Compare two completed analysis reports",
         description=(
             "Compare already-computed reusable analysis reports without reopening audio. Numeric deltas are "
@@ -209,5 +252,6 @@ def register_analysis_tools(
         "analyze_capture_manifest",
         "attribute_master_stress",
         "attribute_bus_contribution",
+        "evaluate_source_intervention_probe",
         "compare_analysis_reports",
     )

@@ -56,7 +56,7 @@ class FakeAnalysisReport:
 
 
 def make_module():
-    calls = {"manifest": [], "compare": [], "stress": [], "bus_contribution": []}
+    calls = {"manifest": [], "compare": [], "stress": [], "bus_contribution": [], "intervention": []}
 
     def analyze_capture_manifest(path, request, *, tap_ids=None):
         calls["manifest"].append((path, request, tap_ids))
@@ -91,6 +91,16 @@ def make_module():
             "leaders": {},
         }
 
+    def evaluate_source_intervention_probe(baseline, candidate, **kwargs):
+        calls["intervention"].append((baseline, candidate, kwargs))
+        return {
+            "schema_version": "source-intervention/v1",
+            "effect_state": "NOT_STARTED",
+            "baseline_capture": {"manifest": str(baseline)},
+            "candidate_capture": {"manifest": str(candidate)},
+            "response": {"top_bus_response_per_declared_db": 1.0},
+        }
+
     def compare_reports(left, right, *, left_label, right_label):
         calls["compare"].append((left, right, left_label, right_label))
         return {"direction": "right_minus_left", "left": left_label, "right": right_label}
@@ -105,6 +115,7 @@ def make_module():
         analyze_capture_manifest=analyze_capture_manifest,
         attribute_capture_master_stress=attribute_capture_master_stress,
         attribute_capture_bus_contribution=attribute_capture_bus_contribution,
+        evaluate_source_intervention_probe=evaluate_source_intervention_probe,
         compare_reports=compare_reports,
     )
     return module, calls
@@ -245,6 +256,64 @@ def test_bus_contribution_bridge_confines_manifest_and_forwards_scope(tmp_path):
     assert kwargs == {
         "bus_label": "DRUMS_POST",
         "source_labels": ("KICK", "SNARE"),
+        "window_ms": 80.0,
+        "hop_ms": 10.0,
+        "low_band_hz": 180.0,
+        "active_threshold_dbfs": -50.0,
+        "top_bus_fraction": 0.2,
+    }
+
+
+def test_source_intervention_bridge_confines_both_manifests_and_forwards_declaration(tmp_path):
+    module, calls = make_module()
+    manifests = []
+    for name in ("baseline", "candidate"):
+        folder = tmp_path / name
+        folder.mkdir()
+        tap = folder / "DRUMS.wav"
+        tap.write_bytes(name.encode("ascii"))
+        manifest = folder / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "taps": [
+                        {
+                            "tap_id": 3,
+                            "final": {"path": tap.name},
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifests.append(manifest)
+
+    bridge = AnalysisFabricBridge(tmp_path, module=module)
+    result = bridge.evaluate_source_intervention_probe(
+        "baseline/manifest.json",
+        "candidate/manifest.json",
+        bus_label="DRUMS_POST",
+        source_target="61-demucs-drums",
+        source_parameter="track_volume",
+        declared_change_db=-1.0,
+        window_ms=80.0,
+        hop_ms=10.0,
+        low_band_hz=180.0,
+        active_threshold_dbfs=-50.0,
+        top_bus_fraction=0.2,
+    )
+
+    assert result["effect_state"] == "NOT_STARTED"
+    assert result["baseline_capture"]["manifest"] == "baseline/manifest.json"
+    assert result["candidate_capture"]["manifest"] == "candidate/manifest.json"
+    baseline, candidate, kwargs = calls["intervention"][0]
+    assert baseline == manifests[0]
+    assert candidate == manifests[1]
+    assert kwargs == {
+        "bus_label": "DRUMS_POST",
+        "source_target": "61-demucs-drums",
+        "source_parameter": "track_volume",
+        "declared_change_db": -1.0,
         "window_ms": 80.0,
         "hop_ms": 10.0,
         "low_band_hz": 180.0,
