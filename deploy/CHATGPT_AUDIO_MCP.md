@@ -97,11 +97,14 @@ With default read-only startup, the server exposes production reads/evidence too
 - `plan_section_capture`;
 - `plan_section_evidence`;
 - `list_audio_analyzers`;
+- `query_installed_plugins`;
 - `analyze_audio`;
 - `analyze_capture_manifest`;
 - `attribute_master_stress`;
 - `attribute_bus_contribution`;
 - `compare_analysis_reports`.
+
+`query_installed_plugins` is local/read-only plugin intelligence. It reports only installed logical products that match reviewed pilot semantics, preserves formats/vendor and evidence/caveat fields, and fails closed for unsupported intents. It performs no web lookup, Live call, plugin insertion or filesystem mutation.
 
 The reusable-analysis tools are a thin seam to the separately owned issue #8 analysis fabric. If that package is absent from the deployed checkout/runtime, `list_audio_analyzers` reports it unavailable and analysis requests fail closed. When #8 is present, callers explicitly select only the capabilities they need and a `CHEAP`, `MODERATE` or `EXPENSIVE` cost ceiling. The MCP adapter keeps direct artifacts, capture manifests and every finalized tap path confined below `CHIBI_AUDIO_ARTIFACT_ROOT`.
 
@@ -118,20 +121,21 @@ After the tunnel profile is connected to the intended ChatGPT workspace:
 1. Inspect the app/plugin action list before enabling it.
 2. Start with the read-only launcher and confirm mutation tools are absent.
 3. Call `status` and require the reviewed capability classes.
-4. Call `list_audio_analyzers`. If the #8 analysis fabric is deployed, require the reviewed capability/cost catalog; otherwise require an explicit unavailable result rather than partial analyzer execution.
-5. Analyze one known artifact or finalized capture manifest with an explicit small capability set/cost ceiling and verify returned artifact references remain relative to `CHIBI_AUDIO_ARTIFACT_ROOT`.
-6. Add artist-authored Ableton Locators such as `Intro`, `Build`, `Drop 1`, `Bridge`.
-7. Call `get_sections` and confirm exact beat ranges match the Arrangement.
-8. Call `resolve_section` for one section and confirm the expected start/end beats.
-9. Call `plan_section_evidence` with the desired tap specs plus an explicit analyzer capability set/cost ceiling and require `effect_state=NOT_STARTED`.
-10. Optionally call `plan_section_capture` for capture-only planning and require `effect_state=NOT_STARTED`.
-11. Do not enable writes until the active Live Set is free for the coordinated bounded-write proof.
-12. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
-13. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
-14. Call `capture_section_evidence` with a small explicit capability set/cost ceiling and require `effect_state=STARTED_CONFIRMED`, `analysis_state=COMPLETED`, the validated `analysis_plan`, and artifact-relative analysis results. If analysis fails after capture, require the response to preserve the confirmed capture/restore/manifest state with `analysis_state=FAILED`.
-15. On an already-finalized reference-bus/source capture, call `attribute_bus_contribution` and require `effect_state=NOT_STARTED`, artifact-relative manifest provenance, metric-specific leaders, and no overall winner.
-16. When a fresh bounded proof is needed, call `capture_section_bus_contribution` with one post-FX non-master bus tap plus distinct post-FX source taps; require exact topology restore, `effect_state=STARTED_CONFIRMED`, and `analysis_state=COMPLETED`.
-17. Call `create_level_matched_ab` on two already-aligned finalized artifacts and require `effect_type=artifact_creation`, `effect_state=STARTED_CONFIRMED`, zero positive gain, and only artifact-root-relative output references.
+4. Call `query_installed_plugins` with a reviewed request such as `what transparent clippers do I own?` and require installed-only logical candidates plus explicit semantic caveats.
+5. Call `list_audio_analyzers`. If the #8 analysis fabric is deployed, require the reviewed capability/cost catalog; otherwise require an explicit unavailable result rather than partial analyzer execution.
+6. Analyze one known artifact or finalized capture manifest with an explicit small capability set/cost ceiling and verify returned artifact references remain relative to `CHIBI_AUDIO_ARTIFACT_ROOT`.
+7. Add artist-authored Ableton Locators such as `Intro`, `Build`, `Drop 1`, `Bridge`.
+8. Call `get_sections` and confirm exact beat ranges match the Arrangement.
+9. Call `resolve_section` for one section and confirm the expected start/end beats.
+10. Call `plan_section_evidence` with the desired tap specs plus an explicit analyzer capability set/cost ceiling and require `effect_state=NOT_STARTED`.
+11. Optionally call `plan_section_capture` for capture-only planning and require `effect_state=NOT_STARTED`.
+12. Do not enable writes until the active Live Set is free for the coordinated bounded-write proof.
+13. When writes are explicitly enabled, first prove one disposable parameter write/read-back/restore operation.
+14. Then prove one named `capture_section` operation and verify the finalized manifest/artifacts stay below `CHIBI_AUDIO_ARTIFACT_ROOT`.
+15. Call `capture_section_evidence` with a small explicit capability set/cost ceiling and require `effect_state=STARTED_CONFIRMED`, `analysis_state=COMPLETED`, the validated `analysis_plan`, and artifact-relative analysis results. If analysis fails after capture, require the response to preserve the confirmed capture/restore/manifest state with `analysis_state=FAILED`.
+16. On an already-finalized reference-bus/source capture, call `attribute_bus_contribution` and require `effect_state=NOT_STARTED`, artifact-relative manifest provenance, metric-specific leaders, and no overall winner.
+17. When a fresh bounded proof is needed, call `capture_section_bus_contribution` with one post-FX non-master bus tap plus distinct post-FX source taps; require exact topology restore, `effect_state=STARTED_CONFIRMED`, and `analysis_state=COMPLETED`.
+18. Call `create_level_matched_ab` on two already-aligned finalized artifacts and require `effect_type=artifact_creation`, `effect_state=STARTED_CONFIRMED`, zero positive gain, and only artifact-root-relative output references.
 
 Stop if the tool list contains an unexpected generic capability, Live is reachable on a non-loopback interface, analysis can escape the configured artifact root, the tunnel launches a different checkout, or a write-enabled surface appears without the explicit launcher flag.
 

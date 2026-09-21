@@ -30,6 +30,7 @@ READ_ONLY_TOOLS = {
     "plan_section_capture",
     "plan_section_evidence",
     "project_snapshot",
+    "query_installed_plugins",
     "resolve_section",
     "status",
     "track_mixer_state",

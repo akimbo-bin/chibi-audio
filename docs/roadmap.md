@@ -330,9 +330,20 @@ Return:
 - full reversible experiment provenance.
 
 **Acceptance:** on KISSKISSKISS, a user can request a loud mix/master goal and Chibi completes at least two autonomous experiment waves on the lab Set with authoritative renders between waves. It identifies a clean-loudness knee and at least one upstream loudness bottleneck, preserves a best-so-far state, and either (a) produces a measurably louder render at comparable or better distortion/translation quality, or (b) stops with concrete evidence that further loudness costs unacceptable quality.
-## R6 - Plugin intelligence only as demanded by the pilot
-Normalize duplicate plugin formats into logical products and improve intent categories. Add manuals/parameter semantics only for plugins we actually need to operate.
-**Acceptance:** requests such as "what transparent clippers do I own?" or "which installed tool can dynamically create space here?" return grounded candidates from the machine inventory.
+## R6 - Plugin intelligence only as demanded by the pilot - DONE
+Completed:
+- duplicate VST2/VST3/CLAP installations are normalized into logical products while preserving physical paths/formats;
+- pilot-relevant category/role coverage remains separate from semantic capability claims;
+- a small reviewed semantics table supports `transparent_clipping` and `dynamic_space` without turning arbitrary category matches into capabilities;
+- natural-language aliases resolve only to reviewed intents and unsupported requests fail closed;
+- every result is the intersection of installed logical products and curated semantics, with confidence, evidence source and caveats;
+- the query is exposed read-only through CLI and MCP without contacting Ableton or the network.
+
+Real AKIMB0-PC proof over 686 physical entries / 472 logical products:
+- "what transparent clippers do I own?" -> StandardCLIP, Newfangled Saturate and GClip;
+- "which installed tool can dynamically create space here?" -> Trackspacer25, FabFilter Pro-Q 3, Ozone 10 Dynamic EQ, bx_dynEQ V2 and soothe2;
+- source-aware spectral-space, generic dynamic-EQ and dynamic-resonance-control semantics remain explicitly distinct.
+**Acceptance: PROVEN.** The roadmap example requests return grounded candidates from the real machine inventory, duplicate formats are collapsed, and the result explicitly avoids claiming that installation or product identity proves subjective transparency/routing behavior.
 ## R7 - Sample intelligence
 Index samples read-only, then add similarity/semantic search only after the production loop is proven useful.
 No automatic file moves or deduplication until project-reference safety is solved.
