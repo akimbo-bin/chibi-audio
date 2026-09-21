@@ -56,7 +56,7 @@ class FakeAnalysisReport:
 
 
 def make_module():
-    calls = {"manifest": [], "compare": [], "stress": []}
+    calls = {"manifest": [], "compare": [], "stress": [], "bus_contribution": []}
 
     def analyze_capture_manifest(path, request, *, tap_ids=None):
         calls["manifest"].append((path, request, tap_ids))
@@ -80,6 +80,17 @@ def make_module():
             "sources": [{"source_label": label} for label in kwargs["source_labels"]],
         }
 
+    def attribute_capture_bus_contribution(path, **kwargs):
+        calls["bus_contribution"].append((path, kwargs))
+        return {
+            "schema_version": "bus-contribution/v1",
+            "capture_manifest": str(path),
+            "effect_state": "NOT_STARTED",
+            "reference_bus": {"source_label": kwargs["bus_label"]},
+            "sources": [{"source_label": label} for label in kwargs["source_labels"]],
+            "leaders": {},
+        }
+
     def compare_reports(left, right, *, left_label, right_label):
         calls["compare"].append((left, right, left_label, right_label))
         return {"direction": "right_minus_left", "left": left_label, "right": right_label}
@@ -93,6 +104,7 @@ def make_module():
         AudioAnalysisService=FakeService,
         analyze_capture_manifest=analyze_capture_manifest,
         attribute_capture_master_stress=attribute_capture_master_stress,
+        attribute_capture_bus_contribution=attribute_capture_bus_contribution,
         compare_reports=compare_reports,
     )
     return module, calls
@@ -201,6 +213,43 @@ def test_master_stress_bridge_confines_manifest_and_forwards_scope(tmp_path):
         "low_band_hz": 180.0,
         "active_threshold_dbfs": -50.0,
         "top_stress_fraction": 0.2,
+    }
+
+
+
+def test_bus_contribution_bridge_confines_manifest_and_forwards_scope(tmp_path):
+    module, calls = make_module()
+    taps = []
+    for tap_id, label in enumerate(("DRUMS_POST", "KICK", "SNARE"), start=1):
+        artifact = tmp_path / f"{label}.wav"
+        artifact.write_bytes(label.encode("ascii"))
+        taps.append({"tap_id": tap_id, "final": {"path": artifact.name}})
+    manifest = tmp_path / "bus.capture.json"
+    manifest.write_text(json.dumps({"taps": taps}), encoding="utf-8")
+    bridge = AnalysisFabricBridge(tmp_path, module=module)
+
+    result = bridge.attribute_capture_bus_contribution(
+        "bus.capture.json",
+        bus_label="DRUMS_POST",
+        source_labels=["KICK", "SNARE"],
+        window_ms=80.0,
+        hop_ms=10.0,
+        low_band_hz=180.0,
+        active_threshold_dbfs=-50.0,
+        top_bus_fraction=0.2,
+    )
+
+    assert result["capture_manifest"] == "bus.capture.json"
+    path, kwargs = calls["bus_contribution"][0]
+    assert path == manifest
+    assert kwargs == {
+        "bus_label": "DRUMS_POST",
+        "source_labels": ("KICK", "SNARE"),
+        "window_ms": 80.0,
+        "hop_ms": 10.0,
+        "low_band_hz": 180.0,
+        "active_threshold_dbfs": -50.0,
+        "top_bus_fraction": 0.2,
     }
 
 

@@ -144,6 +144,41 @@ def register_analysis_tools(
             raise _safe_analysis_error(exc) from None
 
     @server.tool(
+        title="Attribute captured source contribution to one bus",
+        description=(
+            "Use one finalized same-capture reference-bus tap plus explicit source/child taps to report "
+            "full-band and low-band correlation, top-bus uplift, activity deltas, and localized bus events. "
+            "This is read-only association evidence, not proof of causality or subjective quality, and never "
+            "authorizes an Ableton mutation."
+        ),
+        annotations=read_annotations,
+        structured_output=True,
+    )
+    def attribute_bus_contribution(
+        manifest: AnalysisArtifact,
+        bus_label: AnalysisLabel,
+        source_labels: AnalysisSourceLabelList,
+        window_ms: AnalysisPositiveMs = 100.0,
+        hop_ms: AnalysisPositiveMs = 10.0,
+        low_band_hz: AnalysisLowBandHz = 250.0,
+        active_threshold_dbfs: AnalysisDbfsThreshold = -45.0,
+        top_bus_fraction: AnalysisFraction = 0.10,
+    ) -> dict[str, Any]:
+        try:
+            return analysis.attribute_capture_bus_contribution(
+                manifest,
+                bus_label=bus_label,
+                source_labels=source_labels,
+                window_ms=window_ms,
+                hop_ms=hop_ms,
+                low_band_hz=low_band_hz,
+                active_threshold_dbfs=active_threshold_dbfs,
+                top_bus_fraction=top_bus_fraction,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _safe_analysis_error(exc) from None
+
+    @server.tool(
         title="Compare two completed analysis reports",
         description=(
             "Compare already-computed reusable analysis reports without reopening audio. Numeric deltas are "
@@ -173,5 +208,6 @@ def register_analysis_tools(
         "analyze_audio",
         "analyze_capture_manifest",
         "attribute_master_stress",
+        "attribute_bus_contribution",
         "compare_analysis_reports",
     )
