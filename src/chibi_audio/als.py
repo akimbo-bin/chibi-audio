@@ -78,6 +78,15 @@ class ArrangementClipInfo:
 
 
 @dataclass(slots=True)
+class LocatorInfo:
+    id: str | None
+    name: str
+    time_beat: float
+    annotation: str
+    is_song_start: bool
+
+
+@dataclass(slots=True)
 class TrackInfo:
     index: int
     id: str | None
@@ -87,6 +96,8 @@ class TrackInfo:
     group_id: str | None
     devices: list[DeviceInfo]
     arrangement_clips: list[ArrangementClipInfo]
+    automation_envelope_count: int
+    automation_event_count: int
 
 
 def parse_scalar(raw: str | None) -> int | str | None:
@@ -104,6 +115,27 @@ def inspect_set(path: str | Path) -> dict:
 
     tracks: list[TrackInfo] = []
     plugins: set[str] = set()
+    locators: list[LocatorInfo] = []
+    for node in root.iter():
+        if local_name(node.tag) != "Locator":
+            continue
+        time_raw = value(direct_child(node, "Time"))
+        if time_raw is None:
+            continue
+        try:
+            time_beat = float(time_raw)
+        except ValueError:
+            continue
+        locators.append(
+            LocatorInfo(
+                id=node.attrib.get("Id"),
+                name=(value(direct_child(node, "Name")) or "").strip(),
+                time_beat=time_beat,
+                annotation=value(direct_child(node, "Annotation")) or "",
+                is_song_start=value(direct_child(node, "IsSongStart")) == "true",
+            )
+        )
+    locators.sort(key=lambda item: (item.time_beat, item.name, item.id or ""))
 
     for node in root.iter():
         kind = local_name(node.tag)
@@ -152,6 +184,14 @@ def inspect_set(path: str | Path) -> dict:
                     disabled = value(direct_child(clip, "Disabled")) == "true"
                     arrangement_clips.append(ArrangementClipInfo(clip_type, start_beat, end_beat, disabled))
 
+        automation_envelope_count = 0
+        automation_event_count = 0
+        for envelope in descendants(node, "AutomationEnvelope"):
+            automation_envelope_count += 1
+            events = next(descendants(envelope, "Events"), None)
+            if events is not None:
+                automation_event_count += len(list(events))
+
         tracks.append(
             TrackInfo(
                 index=len(tracks),
@@ -162,6 +202,8 @@ def inspect_set(path: str | Path) -> dict:
                 group_id=value(direct_child(node, "TrackGroupId")),
                 devices=devices,
                 arrangement_clips=arrangement_clips,
+                automation_envelope_count=automation_envelope_count,
+                automation_event_count=automation_event_count,
             )
         )
 
@@ -171,6 +213,7 @@ def inspect_set(path: str | Path) -> dict:
         "named_track_count": sum(bool(track.name) for track in tracks),
         "plugin_count": len(plugins),
         "plugins": sorted(plugins, key=str.casefold),
+        "locators": [asdict(locator) for locator in locators],
         "tracks": [asdict(track) for track in tracks],
     }
 

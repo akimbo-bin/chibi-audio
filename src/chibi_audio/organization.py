@@ -75,6 +75,104 @@ def _activity(track: dict[str, Any]) -> dict[str, Any]:
         "spans": spans,
     }
 
+
+def _section_key(name: str, locator_id: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", _normalized(name)).strip("_")
+    if normalized and not normalized.isdigit():
+        return normalized
+    if normalized:
+        return "locator_%s" % normalized
+    return "locator_%s" % str(locator_id or "unnamed")
+
+
+def _section_segments(set_report: dict[str, Any], schema: dict[str, Any]) -> list[dict[str, Any]]:
+    locators = sorted(
+        [
+            item
+            for item in (set_report.get("locators") or [])
+            if isinstance(item, dict) and item.get("time_beat") is not None
+        ],
+        key=lambda item: (
+            float(item["time_beat"]),
+            str(item.get("name") or ""),
+            str(item.get("id") or ""),
+        ),
+    )
+    if not locators:
+        return []
+    preferred = {
+        _normalized(value): str(value)
+        for value in (schema.get("section_order") or [])
+        if str(value).strip()
+    }
+    aliases = {
+        str(key).strip(): str(value).strip()
+        for key, value in (schema.get("section_aliases") or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    segments: list[dict[str, Any]] = []
+    first_time = float(locators[0]["time_beat"])
+    if first_time > 0:
+        segments.append(
+            {
+                "sequence": 0,
+                "key": "pre_locator",
+                "name": "Pre-locator",
+                "start_beat": 0.0,
+                "end_beat": first_time,
+                "semantic": False,
+                "source": "synthetic",
+            }
+        )
+    sequence = len(segments)
+    for index, locator in enumerate(locators):
+        start = float(locator["time_beat"])
+        end = float(locators[index + 1]["time_beat"]) if index + 1 < len(locators) else None
+        raw_name = str(locator.get("name") or "").strip()
+        aliased_name = aliases.get(raw_name)
+        effective_name = aliased_name or raw_name
+        canonical = preferred.get(_normalized(effective_name))
+        display_name = canonical or effective_name or ("Locator %s" % locator.get("id"))
+        segments.append(
+            {
+                "sequence": sequence,
+                "key": canonical or _section_key(effective_name, locator.get("id")),
+                "name": display_name,
+                "locator_id": locator.get("id"),
+                "locator_name": raw_name,
+                "start_beat": start,
+                "end_beat": end,
+                "semantic": aliased_name is not None or canonical is not None or bool(raw_name and not raw_name.isdigit()),
+                "source": "locator_alias" if aliased_name is not None else "locator",
+            }
+        )
+        sequence += 1
+    return segments
+
+
+def _activity_sections(activity: dict[str, Any], sections: list[dict[str, Any]]) -> dict[str, Any]:
+    active: list[dict[str, Any]] = []
+    for section in sections:
+        start = float(section["start_beat"])
+        end = section.get("end_beat")
+        for span in activity.get("spans") or []:
+            span_start = float(span["start_beat"])
+            span_end = float(span["end_beat"])
+            if span_end <= start:
+                continue
+            if end is not None and span_start >= float(end):
+                continue
+            active.append(section)
+            break
+    return {
+        "first_section_key": active[0]["key"] if active else None,
+        "first_section_name": active[0]["name"] if active else None,
+        "first_section_sequence": active[0]["sequence"] if active else None,
+        "active_section_keys": [item["key"] for item in active],
+        "active_section_names": [item["name"] for item in active],
+    }
+
+
 def _root_track(track: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     current = track
     visited: set[str] = set()
@@ -113,8 +211,17 @@ def _drum_rule(name: str, schema: dict[str, Any]) -> dict[str, Any] | None:
 
 def _height_class(track: dict[str, Any], root_role: str | None, semantic_role: str, schema: dict[str, Any]) -> str:
     defaults = schema.get("height_defaults") or {}
+    thresholds = schema.get("height_thresholds") or {}
+    envelopes = int(track.get("automation_envelope_count") or 0)
+    events = int(track.get("automation_event_count") or 0)
+    tall_envelopes = int(thresholds.get("tall_automation_envelopes") or 3)
+    tall_events = int(thresholds.get("tall_automation_events") or 8)
     if track.get("type") == "GroupTrack":
         return str(defaults.get("group") or "tall")
+    if envelopes >= tall_envelopes or events >= tall_events:
+        return "tall"
+    if envelopes or events:
+        return "medium"
     if root_role == "drums":
         return str(defaults.get("simple_drums") or "compact")
     if root_role == "fx":
@@ -245,6 +352,7 @@ def _presentation_color_plan(
 def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
     tracks = list(set_report.get("tracks") or [])
     by_id = {str(item["id"]): item for item in tracks if item.get("id") is not None}
+    sections = _section_segments(set_report, schema)
     rows = []
     unresolved = []
     for fallback_index, track in enumerate(tracks):
@@ -259,20 +367,28 @@ def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) ->
         reason = "top-level family matched schema" if top_rule else "no top-level schema match"
         color_role = str(top_rule.get("color_role")) if top_rule else None
         if root_role == "drums" and track is not root:
-            drum_rule = _drum_rule(str(track.get("name") or ""), schema)
-            if drum_rule:
-                semantic_role = "drums.%s" % drum_rule["role"]
-                role_order = int(drum_rule["order"])
-                color_role = str(drum_rule.get("color_role") or semantic_role)
-                confidence = 0.90
-                reason = "drum-family token matched schema"
+            if track.get("type") == "GroupTrack":
+                semantic_role = "drums.subgroup"
+                role_order = 5
+                color_role = "drums.subgroup"
+                confidence = 0.92
+                reason = "nested group inside DRUMS"
             else:
-                semantic_role = "drums.misc"
-                role_order = 999
-                color_role = "drums.misc"
-                confidence = 0.40
-                reason = "drum bus known; child role unresolved"
+                drum_rule = _drum_rule(str(track.get("name") or ""), schema)
+                if drum_rule:
+                    semantic_role = "drums.%s" % drum_rule["role"]
+                    role_order = int(drum_rule["order"])
+                    color_role = str(drum_rule.get("color_role") or semantic_role)
+                    confidence = 0.90
+                    reason = "drum-family token matched schema"
+                else:
+                    semantic_role = "drums.misc"
+                    role_order = 999
+                    color_role = "drums.misc"
+                    confidence = 0.40
+                    reason = "drum bus known; child role unresolved"
         activity = _activity(track)
+        section_activity = _activity_sections(activity, sections)
         first = activity["first_active_beat"]
         rows.append({
             "track_id": track.get("id"),
@@ -287,13 +403,21 @@ def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) ->
             "role_confidence": confidence,
             "role_reason": reason,
             "activity": activity,
+            "section_activity": section_activity,
             "device_count": len(track.get("devices") or []),
+            "automation": {
+                "envelope_count": int(track.get("automation_envelope_count") or 0),
+                "event_count": int(track.get("automation_event_count") or 0),
+            },
             "current_color_index": track.get("color"),
             "color_role": color_role,
             "height_class": _height_class(track, root_role, semantic_role, schema),
             "order_key": [
                 int(top_rule["order"]) if top_rule else 999,
                 role_order,
+                int(section_activity["first_section_sequence"])
+                if section_activity["first_section_sequence"] is not None
+                else 1_000_000,
                 float(first) if first is not None else 1.0e12,
                 index,
             ],
@@ -385,6 +509,7 @@ def build_project_context(set_report: dict[str, Any], schema: dict[str, Any]) ->
             "sha256": schema.get("_sha256"),
             "version": schema.get("schema_version"),
         },
+        "sections": sections,
         "tracks": rows,
         "unresolved": unresolved,
         "presentation_plan": {

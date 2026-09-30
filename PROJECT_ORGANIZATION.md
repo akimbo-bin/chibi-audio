@@ -32,6 +32,7 @@ The JSON block below is the part Chibi reads directly. Keep the prose in this do
     {"role": "fx", "labels": ["fx", "effects", "sfx"], "order": 60, "color_role": "fx"}
   ],
   "drums": [
+    {"role": "composite_stem", "tokens": ["htdemucs"], "order": 5, "color_role": "drums.composite_stem", "height": "compact"},
     {"role": "kick_layer", "tokens": ["half kick", "top kick", "kick layer", "layered kick", "secondary kick"], "order": 15, "color_role": "drums.kick_layer", "height": "compact"},
     {"role": "kick", "tokens": ["kick"], "order": 10, "color_role": "drums.kick", "height": "compact"},
     {"role": "snare_clap", "tokens": ["snare", "clap"], "order": 20, "color_role": "drums.snare_clap", "height": "compact"},
@@ -44,8 +45,10 @@ The JSON block below is the part Chibi reads directly. Keep the prose in this do
     {"role": "fill_transition", "tokens": ["fill", "transition", "riser"], "order": 80, "color_role": "drums.fill_transition", "height": "compact"}
   ],
   "height_defaults": {"group": "tall", "source": "medium", "simple_drums": "compact", "simple_fx": "compact"},
+  "height_thresholds": {"tall_automation_envelopes": 3, "tall_automation_events": 8},
   "color_indices": {},
-  "section_order": ["intro", "build_1", "drop_1", "bridge", "build_2", "drop_2", "outro"]
+  "section_order": ["intro", "build_1", "drop_1", "bridge", "build_2", "drop_2", "outro"],
+  "section_aliases": {}
 }
 ```
 <!-- chibi-audio:organization-schema:end -->

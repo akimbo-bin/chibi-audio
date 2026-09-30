@@ -204,3 +204,23 @@ def test_inspect_set_reports_arrangement_clip_spans(tmp_path):
         {"type": "AudioClip", "start_beat": 100.0, "end_beat": 108.0, "disabled": False},
         {"type": "AudioClip", "start_beat": 120.0, "end_beat": 124.0, "disabled": True},
     ]
+
+
+def test_inspect_set_reports_locators_and_automation_density(tmp_path):
+    xml = """<Ableton><LiveSet><Locators><Locators><Locator Id='3'><Time Value='96'/><Name Value='Drop 1'/><Annotation Value='house'/><IsSongStart Value='false'/></Locator></Locators></Locators><Tracks><AudioTrack Id='11'><Name><UserName Value='LEAD'/><EffectiveName Value='LEAD'/></Name><Color Value='1'/><TrackGroupId Value='10'/><DeviceChain><MainSequencer/><AutomationEnvelopes><AutomationEnvelope><Events><FloatEvent/><FloatEvent/></Events></AutomationEnvelope><AutomationEnvelope><Events><FloatEvent/></Events></AutomationEnvelope></AutomationEnvelopes><Devices/></DeviceChain></AudioTrack></Tracks></LiveSet></Ableton>"""
+    path = tmp_path / "fixture.als"
+    with gzip.open(path, "wb") as stream:
+        stream.write(xml.encode("utf-8"))
+    report = inspect_set(path)
+    assert report["locators"] == [
+        {
+            "id": "3",
+            "name": "Drop 1",
+            "time_beat": 96.0,
+            "annotation": "house",
+            "is_song_start": False,
+        }
+    ]
+    track = report["tracks"][0]
+    assert track["automation_envelope_count"] == 2
+    assert track["automation_event_count"] == 3

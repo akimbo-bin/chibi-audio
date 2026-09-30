@@ -226,3 +226,65 @@ def test_context_write_is_durable_json(tmp_path):
     assert written == target.resolve()
     assert json.loads(target.read_text(encoding="utf-8")) == payload
     assert not target.with_suffix(".json.tmp").exists()
+
+
+def test_composite_drum_stem_and_nested_group_are_not_fake_instrument_roles():
+    schema = load_organization_schema(SCHEMA_PATH)
+    report = {
+        "path": "C:/Lab/Test.als",
+        "track_count": 3,
+        "tracks": [
+            _track(0, 10, "GroupTrack", "DRUMS", -1),
+            _track(1, 11, "AudioTrack", "61-all-over_htdemucs_ft_mt_0_drums", 10, [_clip(96, 104)]),
+            _track(2, 12, "GroupTrack", "Drop 2 Layers", 10),
+        ],
+    }
+    context = build_project_context(report, schema)
+    by_name = {item["name"]: item for item in context["tracks"]}
+    assert by_name["61-all-over_htdemucs_ft_mt_0_drums"]["semantic_role"] == "drums.composite_stem"
+    assert by_name["61-all-over_htdemucs_ft_mt_0_drums"]["role_confidence"] == 0.90
+    assert by_name["Drop 2 Layers"]["semantic_role"] == "drums.subgroup"
+    assert by_name["Drop 2 Layers"]["role_confidence"] == 0.92
+    assert context["unresolved"] == []
+
+
+def test_locator_sections_are_persisted_and_can_be_aliased_by_schema():
+    schema = load_organization_schema(SCHEMA_PATH)
+    schema["section_aliases"] = {"1": "intro", "3": "drop_1"}
+    report = {
+        "path": "C:/Lab/Test.als",
+        "track_count": 2,
+        "locators": [
+            {"id": "a", "name": "1", "time_beat": 32.0},
+            {"id": "b", "name": "3", "time_beat": 96.0},
+        ],
+        "tracks": [
+            _track(0, 10, "GroupTrack", "DRUMS", -1),
+            _track(1, 11, "AudioTrack", "Drop Kick", 10, [_clip(100, 108)]),
+        ],
+    }
+    context = build_project_context(report, schema)
+    assert [item["key"] for item in context["sections"]] == ["pre_locator", "intro", "drop_1"]
+    kick = next(item for item in context["tracks"] if item["name"] == "Drop Kick")
+    assert kick["section_activity"]["first_section_key"] == "drop_1"
+    assert kick["section_activity"]["active_section_keys"] == ["drop_1"]
+
+
+def test_automation_density_promotes_track_height_without_changing_role():
+    schema = load_organization_schema(SCHEMA_PATH)
+    automated = _track(1, 11, "AudioTrack", "1-Lead Vocal", 10, [_clip(32, 64)])
+    automated["automation_envelope_count"] = 4
+    automated["automation_event_count"] = 12
+    report = {
+        "path": "C:/Lab/Test.als",
+        "track_count": 2,
+        "tracks": [
+            _track(0, 10, "GroupTrack", "VOX", -1),
+            automated,
+        ],
+    }
+    context = build_project_context(report, schema)
+    lead = next(item for item in context["tracks"] if item["name"] == "1-Lead Vocal")
+    assert lead["root_role"] == "vox"
+    assert lead["height_class"] == "tall"
+    assert lead["automation"] == {"envelope_count": 4, "event_count": 12}
