@@ -1,6 +1,6 @@
 # Stem mixdown / REAPER experiment backend
 
-Status: product-direction contract, October 2026.
+Status: product-direction contract, October 2026. Tracked by [#43](https://github.com/akimbo-bin/chibi-audio/issues/43).
 
 ## Purpose
 

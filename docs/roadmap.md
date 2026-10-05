@@ -14,7 +14,7 @@ Generic DAW control, broad plugin enumeration, chat plumbing and orchestration a
 ### Execution split
 
 - **Live source-project plane:** saved/live reconciliation, organization context, arrangement, routing, sidechain and source/device edits, ChibiTap forensics, and final verification of any change that must remain in Ableton.
-- **REAPER stem mixdown plane:** when production is sufficiently committed and the hypothesis is downstream of an explicit export boundary, Live exports aligned stems/parts and REAPER runs scripted balance/bus/master experiments. This is not `.als` conversion.
+- **REAPER stem mixdown plane:** when production is sufficiently committed and the hypothesis is downstream of an explicit export boundary, Live exports aligned stems/parts and REAPER runs scripted balance/bus/master experiments. This is not `.als` conversion. Implementation/proof is tracked by [#43](https://github.com/akimbo-bin/chibi-audio/issues/43).
 - **Analysis plane:** backend-neutral artifact analysis and level-matched comparison.
 - **Core:** durable workflow authority and recovery; it chooses/records the execution backend but is not another audio engine.
 
@@ -302,7 +302,7 @@ Diagnostic windows should normally be 2-8 seconds around known stress/masking ev
 **Acceptance:** on KISSKISSKISS, the workflow can dispatch bounded specialist investigations, share structured evidence, execute one serialized reversible candidate, and complete the representative diagnostic loop materially faster than the prior one-parameter/full-section workflow. The result must include measured setup/render-or-capture/finalization/analysis/controller timings. Multiple workers are optional; speed and useful evidence are the acceptance criteria.
 
 ## R5.75 - Iterative loud mix/master optimizer - BOUNDED KISS STOP-CASE COMPLETE; GENERALIZATION GATED
-Tracked historically by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4), which is closed after the KISS bounded stop-case proof. Further product work is governed by Gates B/C above and the stem-backend issue rather than reopening the same acceptance claim.
+Tracked historically by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4), which is closed after the KISS bounded stop-case proof. Further product work is governed by Gates B/C above and [#43](https://github.com/akimbo-bin/chibi-audio/issues/43) rather than reopening the same acceptance claim.
 
 Support a goal-level request such as:
 
