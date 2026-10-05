@@ -55,6 +55,8 @@ The aligned session path arms/disarms through `chibitap_configure`, which is mul
 
 The legacy `chibitap_capture` helper remains a final-Main convenience path, and `chibitap_refresh` remains a conservative single-final-Main maintenance operation. They are not used to select arbitrary same-track instances. If Main eventually needs multiple persistent ChibiTap maintenance, that should receive its own typed extension rather than weakening these guards.
 
-## Live proof boundary
+## Live proof status
 
-Deterministic tests cover exact-device setup/configure/remove and same-track pre/post session resolution. A real Ableton proof still requires an available AKIMB0-PC execution tunnel and a safe lab Set. No GUI/CUA substitute should be used for that proof.
+Deterministic tests cover exact-device setup/configure/remove and same-track pre/post session resolution, and the path has since been used on the real KISS lab lineage for aligned BASS pre/post evidence. The level-matched A/B proof documents finalized sample-aligned BASS pre/post captures, and the completed sidechain lane uses rendered pre/post target evidence rather than device state as authority.
+
+Issue #14 is closed. Future work should extend typed signal-point coverage only when a concrete production question requires it; do not reintroduce generic device mutation or GUI/CUA fallback.

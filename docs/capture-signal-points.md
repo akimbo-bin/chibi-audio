@@ -60,6 +60,8 @@ Finalized manifests record signal-point provenance under `live_session.tap_mappi
 
 ## Current boundary
 
-The typed ChibiTap management surface intentionally requires exactly one ChibiTap on a target track. This milestone therefore supports one explicit signal point per track per aligned session.
+Same-track multi-instance capture is now part of the reviewed contract. A track may contain distinct ChibiTap instances at reviewed signal points such as `pre_fx` and `post_fx`; setup/configure/remove are exact-device guarded, and capture-session resolution selects the physical ChibiTap occupying each requested signal point.
 
-Simultaneous `pre_fx` + `post_fx` capture on the same track is a follow-on change: it requires a deliberate instance selector in the bridge rather than weakening the current exactly-one-instance guard. Until that selector exists, use different target tracks or separate bounded sessions rather than generic device mutation or GUI fallback.
+Two semantic signal-point requests that collapse onto the same physical position/device are still refused rather than pretending one tap is two independent evidence sources. There is no generic arbitrary device selector or GUI fallback.
+
+See [chibitap-multi-instance.md](chibitap-multi-instance.md) and [capture-topology.md](capture-topology.md).

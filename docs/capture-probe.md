@@ -13,9 +13,14 @@ Typed Live control is split into two narrow capabilities:
 
 The first end-to-end Live proof captured real non-zero 48 kHz stereo float32 audio with no Export Audio/Video dialog and no CUA. A control capture over a silent musical range produced an all-zero file exactly as expected.
 
-### Current limitation
+### Current boundary
 
-ChibiTap 0.2.0 may be armed while stopped but writes only while the host playhead reports playback. Main/BASS/DRUMS therefore produced exactly equal sample counts in one Live pass. The remaining issue is requested-range finality: the coordinator still polls transport and can issue `stop` late, so all taps share the same overrun. The next capture-session layer must terminate or crop on the exact requested host beat/sample boundary.
+ChibiTap 0.2.0 may be armed while stopped but writes only while the host playhead reports playback. Main/BASS/DRUMS produce aligned raw captures in one Live pass, and the capture-session/finalizer now turns any documented shared transport overrun into the exact requested common sample interval with hashes and manifest provenance.
+
+The remaining capture-plane constraints are different:
+- Live/ChibiTap evidence is still fundamentally a realtime host-play path, so use short synchronized diagnostic windows and multi-tap passes rather than repeated long captures;
+- exact beat-to-sample conversion is currently authoritative only for constant-BPM requested ranges; tempo automation needs a tempo-map-aware boundary model;
+- bulk downstream mix/master candidate search should use the separate fidelity-gated stem backend when the hypothesis no longer requires Live source-project context.
 
 ## Experimental/fallback path: AgentAudioTap Max for Live
 
