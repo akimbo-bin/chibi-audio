@@ -1,5 +1,55 @@
 # Roadmap
 The roadmap is deliberately pilot-first. New platform work is allowed only when the current acceptance boundary needs it.
+
+## October 2026 product-direction reset
+
+The next objective is **not** to make a larger Ableton MCP or a larger agent hierarchy. Chibi Audio must first prove that its closed loop produces useful, repeatable improvements on KISSKISSKISS and can do so at practical throughput.
+
+The product thesis is:
+
+> understand the real project -> isolate one production problem -> run a few controlled experiments -> return trustworthy A/B evidence -> preserve what the artist prefers.
+
+Generic DAW control, broad plugin enumeration, chat plumbing and orchestration are supporting layers. They are not success criteria by themselves.
+
+### Execution split
+
+- **Live source-project plane:** saved/live reconciliation, organization context, arrangement, routing, sidechain and source/device edits, ChibiTap forensics, and final verification of any change that must remain in Ableton.
+- **REAPER stem mixdown plane:** when production is sufficiently committed and the hypothesis is downstream of an explicit export boundary, Live exports aligned stems/parts and REAPER runs scripted balance/bus/master experiments. This is not `.als` conversion.
+- **Analysis plane:** backend-neutral artifact analysis and level-matched comparison.
+- **Core:** durable workflow authority and recovery; it chooses/records the execution backend but is not another audio engine.
+
+See [stem-mixdown-reaper.md](stem-mixdown-reaper.md).
+
+### Product gates
+
+#### Gate A - trustworthy baseline and controller reality
+- reconcile current bridge health before mutation;
+- demonstrate repeatable unchanged captures/renders and exact restoration;
+- benchmark the copied-Set control tasks that matter against serious existing Ableton controllers instead of assuming bespoke plumbing is superior;
+- record wall-clock breakdown for setup, playback/render, finalization, analysis and controller overhead.
+
+**Pass:** the chosen Live-control path is reliable, and retained custom subsystems have a concrete safety/capability/throughput reason to exist.
+
+#### Gate B - one artist-preferred KISS improvement
+Choose one problem the artist actually cares about. Test a small number of materially different evidence-backed hypotheses, produce level-matched blind-friendly A/Bs including the untouched baseline, and allow "none is better."
+
+**Pass:** an accepted candidate is repeatedly preferred by the artist, survives other relevant passages, and is exactly reproducible/reversible.
+
+A metric-only win does not pass this gate.
+
+#### Gate C - make that experiment fast
+Profile and batch the inner loop. Reuse a validated capture topology/session where safe, capture relevant signals in one pass, request only evidence that can affect the decision, and prototype the Ableton-stem -> REAPER backend.
+
+**Pass:** useful candidate throughput improves materially on the same representative task without reducing fidelity, effect certainty or rollback confidence.
+
+#### Gate D - unattended/resumable proof
+Only after Gates A-C, run bounded multi-wave work through Core, deliberately interrupt it, resume it, and verify that uncertain effects are reconciled rather than replayed.
+
+**Pass:** the result package is understandable: baseline, finalists, exact accepted/rejected changes, evidence, timing, best-so-far state and a truthful stop reason.
+
+### Priority consequence
+
+R6 plugin intelligence and R7 sample intelligence remain useful capabilities, but broad expansion is **deferred unless the current KISS gate requires it**. Perfect organization taxonomy and larger worker topologies are likewise subordinate to proving audible value and throughput.
 ## R0 - Establish reality and a safe playground - DONE
 Completed:
 - read real `.als` files without mutation;
@@ -125,8 +175,8 @@ Build a ranked contribution report around the loudest master events:
 - predicted small upstream interventions.
 Test distributed peak control (source/track/bus) against final-limiter-only loudness.
 **Acceptance:** at least one A/B demonstrates either more clean loudness at comparable character or the same loudness with lower distortion/less pumping.
-## R5.25 - Sidechain intelligence, routing and verification - TARGET
-Tracked by [#5](https://github.com/akimbo-bin/chibi-audio/issues/5).
+## R5.25 - Sidechain intelligence, routing and verification - KISS ACCEPTANCE COMPLETE
+Tracked by [#5](https://github.com/akimbo-bin/chibi-audio/issues/5), now closed after the real KISS sidechain audit/experiment/rollback and intent-level multi-target acceptance.
 
 Treat sidechaining as a **core mix primitive**, not merely a plugin insertion task. Chibi must understand and verify explicit source -> target relationships such as kick -> bass, snare -> music bus, or vocal -> competing instruments.
 
@@ -247,18 +297,18 @@ Use hierarchical synchronized capture to control realtime cost:
 - **suspect-bus census:** capture all relevant children of the bus implicated by current evidence in one pass;
 - **surgical capture:** add pre/post points only around the small number of suspected processors or relationships.
 
-Diagnostic windows should normally be 2-8 seconds around known stress/masking events. Full-drop and full-song evidence is reserved for acceptance of candidates that already survived the fast diagnostic round. Benchmark ChibiTap at increasing tap counts and, if per-instance writers become the bottleneck, move toward a shared multi-stream capture backend. Investigate a trustworthy faster-than-realtime/native render executor for bulk evidence, but do not reintroduce steady-state GUI automation merely for speed.
+Diagnostic windows should normally be 2-8 seconds around known stress/masking events. Full-drop and full-song evidence is reserved for acceptance of candidates that already survived the fast diagnostic round. Benchmark ChibiTap at increasing tap counts and, if per-instance writers become the bottleneck, move toward a shared multi-stream capture backend. In parallel, prototype the explicit Live-stem -> REAPER mixdown backend for downstream work; measure baseline fidelity and end-to-end candidate throughput before treating it as a win. Do not reintroduce steady-state GUI automation merely for speed.
 
-**Acceptance:** on KISSKISSKISS, Core can dispatch at least two specialist investigations from one orchestrated mix wave, share structured evidence between them, execute one serialized reversible Ableton candidate, and complete the diagnostic loop materially faster than the prior one-parameter/full-section workflow.
+**Acceptance:** on KISSKISSKISS, the workflow can dispatch bounded specialist investigations, share structured evidence, execute one serialized reversible candidate, and complete the representative diagnostic loop materially faster than the prior one-parameter/full-section workflow. The result must include measured setup/render-or-capture/finalization/analysis/controller timings. Multiple workers are optional; speed and useful evidence are the acceptance criteria.
 
-## R5.75 - Iterative loud mix/master optimizer - TARGET
-Tracked by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4).
+## R5.75 - Iterative loud mix/master optimizer - BOUNDED KISS STOP-CASE COMPLETE; GENERALIZATION GATED
+Tracked historically by [#4](https://github.com/akimbo-bin/chibi-audio/issues/4), which is closed after the KISS bounded stop-case proof. Further product work is governed by Gates B/C above and the stem-backend issue rather than reopening the same acceptance claim.
 
 Support a goal-level request such as:
 
 > "I want to mix and master this track to be loud."
 
-Chibi should be able to pursue that goal through **bounded waves of reversible Live Set changes, authoritative renders, analysis and adaptation** rather than one-shot plugin advice or a scalar LUFS target.
+Chibi should be able to pursue that goal through **bounded waves of reversible experiments, authoritative-for-the-chosen-backend renders, analysis and adaptation** rather than one-shot plugin advice or a scalar LUFS target. Source/routing-sensitive waves stay in Live; downstream stem mixdown/master waves may run in REAPER after the stem package passes its baseline-fidelity gate.
 
 ### Goal contract
 Before the loop begins, establish a target bundle and constraints from the user, references and current Set. The bundle may include:
@@ -298,8 +348,8 @@ Each optimization wave should:
 2. rank a small number of causal hypotheses from R5/R5.25/R5.5;
 3. choose one coherent bounded intervention with expected benefit and risk;
 4. checkpoint the exact current state;
-5. apply the mutation through the typed Live path and read it back;
-6. render authoritatively through Live;
+5. apply the candidate through the selected reviewed backend and verify/read it back; Live mutations use the typed Live path, while REAPER candidates are isolated project/render state against an immutable stem package;
+6. render through the validated backend selected for this wave (Live for project/source interactions; REAPER only for a downstream stem package that passed baseline fidelity);
 7. analyze both **level-matched** and **as-produced** comparisons;
 8. keep the candidate only if it improves the goal without violating guardrails; otherwise roll back exactly;
 9. update the evidence and choose the next wave rather than blindly repeating the same strategy.
@@ -329,11 +379,11 @@ Return:
 - remaining tradeoffs and confidence;
 - full reversible experiment provenance.
 
-**Acceptance:** on KISSKISSKISS, a user can request a loud mix/master goal and Chibi completes at least two autonomous experiment waves on the lab Set with authoritative renders between waves. It identifies a clean-loudness knee and at least one upstream loudness bottleneck, preserves a best-so-far state, and either (a) produces a measurably louder render at comparable or better distortion/translation quality, or (b) stops with concrete evidence that further loudness costs unacceptable quality.
-## R6 - Plugin intelligence only as demanded by the pilot
+**Acceptance:** on KISSKISSKISS, a user can request a loud mix/master goal and Chibi completes at least two bounded experiment waves using the authorized lab lineage and/or a fidelity-gated immutable stem package, with authoritative-for-that-backend renders between waves. It identifies a clean-loudness knee and at least one upstream loudness bottleneck, preserves a best-so-far state, and either (a) produces a measurably louder render at comparable or better distortion/translation quality, or (b) stops with concrete evidence that further loudness costs unacceptable quality.
+## R6 - Plugin intelligence only as demanded by the pilot - DEFERRED UNLESS CURRENT GATE NEEDS IT
 Normalize duplicate plugin formats into logical products and improve intent categories. Add manuals/parameter semantics only for plugins we actually need to operate.
 **Acceptance:** requests such as "what transparent clippers do I own?" or "which installed tool can dynamically create space here?" return grounded candidates from the machine inventory.
-## R7 - Sample intelligence
+## R7 - Sample intelligence - DEFERRED UNLESS CURRENT GATE NEEDS IT
 Index samples read-only, then add similarity/semantic search only after the production loop is proven useful.
 No automatic file moves or deduplication until project-reference safety is solved.
 ## R8 - Generalized mix assistant
@@ -342,7 +392,8 @@ Expand the proven experiment loop to:
 - compression/clipper experiments;
 - generalized sidechain relationships building on the verified R5.25 source-target graph;
 - per-section automation;
-- optional offline plugin-chain experiments;
+- validated stem-package -> REAPER mixdown/master experiments as the first offline execution path;
+- optional Pedalboard/DawDreamer plugin-chain experiments only if a narrower test justifies them;
 - aligned audio-rate evidence through ChibiTap VST3 instances, with Max for Live retained only for specialized/fallback adapters;
 - perceptual/audibility/translation evidence proven in R5.5;
 - general goal-driven iterative optimization loops derived from the bounded R5.75 loudness workflow.

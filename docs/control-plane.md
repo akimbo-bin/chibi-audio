@@ -94,3 +94,11 @@ Authentication/network exposure is deliberately separate from the Live Remote Sc
 This lane does not exercise live mutations while another worker owns the active KISSKISSKISS Set. Host-independent tests land first. A coordinated disposable live proof follows only when the active Set is free.
 
 The ChibiTap worker continues to own audio-plane capture, multi-tap identity and sample alignment. This control lane consumes those capabilities but does not take over the VST implementation.
+
+## Execution backends are not workflow authorities
+
+Live and REAPER are execution surfaces, not independent planners.
+
+Core owns durable workflow state and selects the reviewed backend for each bounded wave. Live mutation remains serialized and effect-certain. A REAPER stem experiment is isolated against an immutable exported package and may run candidate renders without acquiring a Live mutation lease because it is not changing Live; any later attempt to reproduce the winner in Live requires the normal Live lease/checkpoint/verification path.
+
+The control plane should prefer one coarse-grained experiment request over chat-supervised sequences of parameter reads, writes and renders. Every long-running experiment should report timing and resumable provenance so overnight automation improves throughput rather than merely hiding latency.

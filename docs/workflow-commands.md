@@ -19,8 +19,8 @@ Every command should be effect-certain and resumable:
 3. create or resume a Core-owned workflow/job ID;
 4. record goal, guardrails, budget, current best state and evidence references;
 5. dispatch bounded specialist investigations in parallel where useful;
-6. serialize all Ableton mutations through one executor;
-7. capture/render and evaluate authoritative evidence;
+6. serialize all Ableton mutations through one executor and keep downstream stem experiments isolated from Live mutation state;
+7. choose the execution backend appropriate to the hypothesis, capture/render, and evaluate authoritative-for-that-backend evidence;
 8. keep, refine or roll back exactly;
 9. checkpoint durable state so another Chibi can resume the same job;
 10. stop only at a real goal/guardrail/budget/subjective-judgment boundary.
@@ -39,7 +39,9 @@ Output: durable project-context graph + organization diff + unresolved/low-confi
 
 `mix` may call `sidechain` and `master` as specialist sub-workflows when their evidence is relevant. It should prefer upstream/source/bus fixes before leaning harder on the final limiter, and use short diagnostic windows before full-section acceptance renders.
 
-Parallel workers accelerate analysis and share Core-held evidence. They never mutate Live independently; the one serialized executor owns checkpoints, writes and restores.
+Parallel workers may accelerate analysis and share Core-held evidence, but they are not a success criterion by themselves. They never mutate Live independently; the one serialized executor owns Live checkpoints, writes and restores.
+
+For a downstream mixdown/master problem, `mix` may instead create a validated stem package from Live and run one or more isolated REAPER candidates against that immutable package. Those candidates do not become Live mutations merely because they win.
 ## `sidechain`
 
 `sidechain` is both standalone and callable by `mix`. It audits source -> target relationships, measures actual rendered reduction/timing/overlap, proposes the smallest sufficient intervention, performs bounded experiments when authorized, and returns routing plus audio evidence to the parent workflow.
@@ -48,7 +50,17 @@ It must reason across the project hierarchy rather than cloning one sidechain am
 
 ## `master`
 
-`master` is both standalone and callable by `mix`. It owns the final-bus goal contract, reference/delivery constraints, clean-loudness knee, final dynamics/translation evidence and master-chain candidates. It must not hide upstream mix problems by blindly increasing final limiting.
+`master` is both standalone and callable by `mix`. It owns the final-bus goal contract, reference/delivery constraints, clean-loudness knee, final dynamics/translation evidence and master-chain candidates. It must not hide upstream mix problems by blindly increasing final limiting. Once the mix/premaster boundary is explicitly accepted, `master` is a natural candidate for the REAPER stem/premaster backend; upstream fixes still return to Live.
+## Execution-backend selection
+
+Backend selection is part of the workflow plan, not a hidden implementation switch.
+
+- `live`: default for organization, routing, sidechain, automation, source/device experiments and any edit expected to remain in the Ableton project.
+- `reaper_stem`: allowed for downstream mixdown/master work after an explicit stem-package export and unchanged-baseline fidelity check.
+- other offline/plugin hosts: experimental until a concrete KISS task proves they are needed.
+
+The command result must state which backend produced each candidate. A REAPER result can be accepted as the final stem-based mix/master deliverable, or treated as a proposal to reproduce in Live; that choice must be explicit.
+
 ## Invocation surfaces
 
 The same intent should be reachable without inventing a separate workflow per client:
@@ -68,6 +80,8 @@ Each command should expose a stable request/result envelope containing at least:
 - `mode` (`plan`, `bounded_wave`, or `run_until_boundary`);
 - fresh Set/project-context identity;
 - mutation/render budget;
+- execution backend and, when applicable, immutable stem-package reference + baseline-fidelity result;
+- timing breakdown for setup, render/capture, finalization, analysis and controller overhead;
 - current effect certainty (`NOT_STARTED`, `STARTED_CONFIRMED`, `UNKNOWN`);
 - best-so-far checkpoint and evidence references;
 - specialist child jobs and their status;

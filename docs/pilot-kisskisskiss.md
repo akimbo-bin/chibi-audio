@@ -7,7 +7,23 @@ This song is the proving ground for Chibi Audio. The goal is not to perfect the 
 - The currently open Live Set has unsaved changes, so the lab lineage must capture/reconcile that state before sonic edits begin.
 - No destructive flatten/delete/consolidate operation in the pilot.
 - No sample-library moves.
+- No attempt to convert the Live Set into another DAW. A REAPER experiment begins only from an explicitly exported, aligned audio package.
 - No direct `.als` XML writes.
+## October 2026 product proof reset
+
+KISS is now the go/no-go proof for the product, not merely a test fixture for more infrastructure.
+
+The immediate order is:
+1. restore trustworthy Live bridge/baseline operation;
+2. choose one production problem the artist genuinely wants improved;
+3. generate a small number of materially different, evidence-backed candidates and provide level-matched comparisons including the untouched baseline;
+4. accept progress only when the artist actually prefers a candidate and the win survives other relevant passages;
+5. profile that exact loop;
+6. use the same task to test whether a stem-based REAPER backend increases useful candidate throughput;
+7. only then expand unattended/multi-wave orchestration.
+
+A measurement-only improvement is not sufficient evidence that Chibi improved the song.
+
 ## Known project facts
 - Ableton Live 12, 48 kHz.
 - 135 BPM, D#/Eb minor as currently configured in Live.
@@ -128,7 +144,41 @@ The pilot is moving away from one-parameter/full-section brute-force experiments
 
 Current KISS evidence already narrows the first house-drop investigation: DRUMS lead the full-band master-stress evidence, BASS leads the sub-250 Hz stress evidence, the existing bass ducking is very deep, and a real Pro-L 2 experiment (+12.40 -> +12.90 dB Gain) moved Locator 3 only from **-8.53 to -8.45 LUFS** while true peak stayed at **-1.00 dBTP**. That is only **0.16 LU gained per dB of added limiter drive**, below the current clean-loudness efficiency threshold, so harder final limiting is not the next strategy.
 
-The new KISS loop is hierarchical: short master/premaster/major-bus census -> suspect-bus child census -> surgical pre/post evidence -> one serialized reversible candidate -> short re-capture -> full-drop acceptance only for winners. Chibi Core should own this workflow now, with parallel bus/source/sidechain/reference workers sharing structured evidence while one executor owns Ableton effects.
+The KISS loop is hierarchical: short master/premaster/major-bus census -> suspect-bus child census -> surgical pre/post evidence -> one serialized reversible candidate -> short re-capture -> full-drop acceptance only for winners. Chibi Core owns durable workflow state; parallel workers are optional accelerators, while one executor owns Ableton effects.
+
+When diagnosis reaches a genuinely downstream mixdown/master question, the workflow may hand off to the stem backend below instead of repeatedly driving the whole Live project.
+
+## Stem mixdown / REAPER experiment lane - 2026-10-05
+
+This lane implements the intended meaning of "use REAPER for the mixdown": **do not convert KISS to REAPER. Export audio from the lab Live Set, then use REAPER as a smaller, faster downstream mixing/mastering engine.**
+
+### Export package
+
+For the first KISS proof, prefer a small musically meaningful stem set (for example top-level audible groups such as VOX, BASS, DRUMS and FX, plus any additional audible music/harmonic group that exists). Export finer parts only when the experiment needs them. A SIDECHAIN/trigger track may be exported as control input even when it is not part of the audible sum.
+
+Use one common start/end range, 48 kHz to match the project, floating-point PCM where supported, and no normalization. Record whether track/group processing is already printed. Shared returns and Main/master processing must be explicit:
+
+- clean mixdown package: do not accidentally print the same shared return/master chain into every stem;
+- print dedicated return/FX stems when their contribution must be reconstructed;
+- if a nonlinear group/bus interaction is essential, export at or before the boundary that preserves the interaction, or keep that experiment in Live;
+- always export a corresponding Live reference render for baseline validation.
+
+### REAPER baseline gate
+
+Build the REAPER project deterministically from the package, make **no sonic changes**, render it, and compare it with the declared Live stem baseline. If alignment, level, spectral/dynamic behavior or shared-FX reconstruction is outside the experiment's tolerance, the handoff is not trustworthy and no REAPER candidate is accepted.
+
+### First performance experiment
+
+Use one already-understood downstream KISS question and compare:
+
+1. the normal Live experiment loop;
+2. the same bounded candidate family from the immutable REAPER stem package.
+
+Measure setup, render, finalization, analysis and controller time separately. The win condition is useful candidate throughput at equivalent evidence quality, not merely a faster DAW progress bar.
+
+A successful REAPER mix/master may be delivered as the final stem-based result if the artist chooses that workflow. If the goal is to improve the Ableton Set itself, the REAPER result remains a proposal until reproduced and verified in Live.
+
+See [stem-mixdown-reaper.md](stem-mixdown-reaper.md).
 
 ## Typed ChibiTap capture proof - 2026-09-15
 

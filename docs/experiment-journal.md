@@ -1,6 +1,6 @@
 # Experiment journal
 
-The experiment journal is the durable decision/provenance layer around finalized ChibiTap capture manifests.
+The experiment journal is the durable decision/provenance layer around finalized production evidence. ChibiTap capture manifests are the first proven source; the same lineage must also be able to bind a validated downstream stem-backend render without pretending it was a Live mutation.
 
 It does **not** run Live, mutate the Set, decode audio, score mix quality, or decide taste. Capture execution remains owned by the capture/session layer. Measurements remain owned by the analysis fabric. The artist remains final authority on keep/reject/refine decisions.
 
@@ -97,6 +97,15 @@ Attached analysis reports remain evidence rather than authority. The experiment 
 
 ## Current boundary
 
-This first slice is a pure library module and unit-test fixture. It does not modify `cli.py`, the MCP surface, `capture_session.py`, or `src/chibi_audio/analysis/**`, avoiding collision with the active #6 and #8 lanes.
+The journal is now part of the optimization evidence contract: clean-loudness evaluation code can load journal-bound analysis and persist evaluation artifacts without turning the journal into a musical judge.
 
-The next integration step is to have the optimizer/control layer create these journals automatically from read-back-verified before/after snapshots plus finalized `capture_section_evidence` results, while preserving this module as a pure provenance layer rather than a second execution authority.
+The next schema/integration boundary is backend-neutral experiment provenance. A downstream stem candidate must add, at minimum:
+
+- execution backend;
+- immutable stem-package ID / content hashes;
+- unchanged-baseline fidelity result;
+- backend project/candidate identity;
+- render mode and timing breakdown;
+- explicit statement of whether acceptance means `final external mix/master` or `proposal to reproduce in Live`.
+
+Live mutation effect certainty and downstream-render certainty remain separate. A winning REAPER render must never be recorded as proof that the Ableton Set itself changed.

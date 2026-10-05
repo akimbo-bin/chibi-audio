@@ -2,7 +2,7 @@
 
 Issue: #8
 
-This lane owns reusable, on-demand audio evidence. It is deliberately separate from both the ChibiTap capture lane and the typed Ableton/MCP lane in #6 / PR #7.
+Issue #8 is complete and merged; this document describes the reusable, on-demand analysis fabric. It remains deliberately separate from ChibiTap capture execution and from the typed Ableton/control plane tracked in #6.
 
 ## Contract
 
@@ -42,7 +42,7 @@ Finalized artifact paths in new manifests are relative to the manifest directory
 
 `AudioAnalysisService.analyze(..., content_sha256=...)` then accepts the already-proven capture digest, so normal analysis does not need to hash a large finalized capture a second time.
 
-Analysis can also be bounded by exact `start_seconds` / `end_seconds`. PR #7 can later resolve an Ableton locator or named section to a range and pass only the desired audio window to this layer. This layer does not read or mutate the Live Set itself.
+Analysis can also be bounded by exact `start_seconds` / `end_seconds`. The locator/section layer can resolve an Ableton locator or named section to a range and pass only the desired audio window to this layer. This layer does not read or mutate the Live Set itself.
 
 `align_capture_events(...)` is a zero-DSP second-stage primitive over already-computed multi-tap reports. It can cluster onset, beat, structure-boundary, strongest-transient, or Basic Pitch note-start evidence across aligned taps within a caller-supplied tolerance. Cluster span is bounded by that tolerance so chained near-events cannot bridge into a falsely broad coincidence. Coincidence is timing evidence only; it does not prove causal source contribution.
 
@@ -167,7 +167,7 @@ Float ChibiTap captures can exceed normalized magnitude 1.0. The levels report t
 - Essentia: useful research material, but not a core dependency because of AGPLv3 distribution implications.
 - Demucs/source separation: later EXPENSIVE/reference-only work; never a normal default analyzer.
 
-This PR does not add the optional model stacks to `pyproject.toml`; PR #7 currently owns that shared file. Runtime availability is advertised truthfully and the planner refuses unavailable capabilities.
+Optional model stacks remain explicitly provisioned rather than silently becoming mandatory core dependencies. Runtime availability is advertised truthfully and the planner refuses unavailable capabilities.
 
 ## Intended MCP seam
 
@@ -183,3 +183,13 @@ compare_analysis_reports(left_report_ref, right_report_ref)
 The existing generic capability field means the expanding analyzer catalog does not require analyzer-specific MCP methods. Event alignment and capture spectral-overlap comparison can likewise remain small read-only helpers over capture-analysis reports once the MCP worker is ready for that seam.
 
 It should not expose analyzer implementation details as workflow authority. Chibi/Core/ChatGPT decides what evidence is needed; this package computes the requested evidence and returns provenance.
+
+## Backend-neutral experiment evidence
+
+The analysis fabric is intentionally artifact-oriented rather than DAW-oriented. A finalized Live/ChibiTap artifact and a REAPER stem-backend render may use the same analyzers and comparison primitives when both have explicit provenance and compatible alignment.
+
+Planned downstream-backend manifests should carry the immutable stem-package identity, REAPER candidate identity, render mode, hashes/sample counts, and the corresponding unchanged-baseline fidelity result. The analysis layer may compare those artifacts; it must not infer that a REAPER candidate changed the Ableton Set.
+
+### Calibration warning for relative proxies
+
+Within-file normalized diagnostics (for example a relative harshness/event ranking) are useful for locating unusual events inside one artifact, but their normalized score is not automatically a common absolute scale across two candidates. Cross-candidate acceptance must rely on measurements with comparable semantics, calibrated model evidence, or direct level-matched listening. Do not promote a relative diagnostic proxy into a universal `sounds better` score.

@@ -1,6 +1,6 @@
 ﻿# Operator rules
 - Preserve artist intent; do not generate or replace musical material unless explicitly asked.
-- Chibi Core is the eventual workflow authority; this repository supplies production capabilities, not a second scheduler or task database.
+- Chibi Core is the durable workflow authority for resumable multi-wave work; this repository supplies production capabilities, not a second scheduler or task database.
 - Observe fresh project state before every mutation batch.
 - Prefer typed Live/bridge operations over GUI automation.
 - Never silently fall back to mouse/keyboard automation when a structured operation fails.
@@ -14,4 +14,9 @@
 - Level-match subjective A/B comparisons unless loudness itself is the variable being tested.
 - Numerical targets are evidence, not authority; user listening decides subjective acceptance.
 - No replay after an unknown effect. Reconcile first.
+- Ableton Live remains authoritative for project/source state, routing-sensitive edits, and any change that must remain in the Live Set.
+- REAPER may be used as a downstream stem mixdown/master experiment backend only after an explicit, provenance-carrying stem export boundary. Do not attempt to convert an `.als` project into REAPER.
+- A stem/offline backend must reproduce its declared unchanged baseline closely enough for the exact experiment before its candidates can be trusted. If the export boundary bakes away the interaction being investigated, return to Live.
+- Prefer coarse-grained local experiment jobs over chat-supervised knob-by-knob loops, and record setup/render/analysis/controller timings.
+- Do not expand agent/orchestration scope until the current pilot proves repeatable artist-preferred sonic improvements.
 - Do not expand platform scope unless the current pilot acceptance boundary requires it.

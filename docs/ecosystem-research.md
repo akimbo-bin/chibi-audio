@@ -1,4 +1,4 @@
-﻿# Ecosystem research - September 2026
+﻿# Ecosystem research - October 2026
 This document converts the ecosystem survey into build decisions. It is deliberately not a link dump: every upstream project has a role, a boundary, and a reason we are or are not depending on it.
 ## Decision summary
 The commodity layer is already well explored: Python Remote Scripts, Live Object Model wrappers, OSC bridges, MCP transport, device/parameter enumeration, browser search, and basic track/clip operations all exist in open-source projects.
@@ -11,7 +11,9 @@ Our differentiating layer is:
 - section-aware audio evidence;
 - reference-aware comparison;
 - track-level contribution and loudness-stress analysis;
-- reproducible A/B experiments with artist acceptance.
+- reproducible A/B experiments with artist acceptance;
+- a measured fast-path from project diagnosis to candidate comparison;
+- backend-neutral experiment provenance so Live and a validated stem backend can be compared without confusing their authority.
 ## Local research shortlist
 The following repositories are checked out separately for source-level study. They are not vendored into this repository.
 | Upstream | Local research role | License observed in checkout | Checkout freshness | Decision |
@@ -24,6 +26,9 @@ The following repositories are checked out separately for source-level study. Th
 | `MTG/essentia` | Rich audio feature extraction | AGPLv3 | last checked commit dated 2026-08-27 | **REFERENCE or isolated optional tool pending license decision** |
 | `librosa/librosa` | Python feature-analysis baseline and rapid prototypes | ISC | last checked commit dated 2026-08-22 | **ADOPT where useful** |
 | `facebookresearch/demucs` | Analytical source separation | MIT | last checked commit dated 2023-11-16 | **OPTIONAL/REFERENCE; not core** |
+| `adamjmurray/producer-pal` | Serious Ableton MCP/REST product benchmark: project editing, compact context and client-agnostic control | GPL-3.0 | reviewed October 2026 | **BENCHMARK; borrow interaction/context ideas selectively** |
+| `DBraun/DawDreamer` | Programmable offline VST/audio graph and automation research | GPL-3.0 | reviewed October 2026 | **SECONDARY PROTOTYPE/REFERENCE** |
+| REAPER / ReaScript | Scriptable DAW backend for aligned stem mixdown/master experiments, render queues and full-speed offline rendering | commercial application/API, not vendored | reviewed October 2026 | **PREFERRED FIRST STEM BACKEND TO PROTOTYPE** |
 The license column is an engineering planning signal, not legal advice. Copyleft candidates stay outside the core dependency set until we make an explicit distribution/compliance decision.
 ## Ableton bridge findings
 ### What existing projects already solve
@@ -86,9 +91,24 @@ Near-term core measurements:
 - section-to-section contrast;
 - level-matched difference/comparison measurements.
 `librosa` is suitable for rapid feature work. More specialized native libraries can be added only when a concrete pilot requirement justifies them. `Essentia` is useful research material, but its AGPL license means it should not quietly become a core public dependency.
-## Plugin hosting / offline experiments
-Offline rendering of a proposed plugin chain is attractive because it can reduce DAW mutation during search. `pedalboard` is a strong prototype/reference candidate, but its observed GPLv3 license requires an explicit project licensing decision before we make it part of the distributed core.
-The first pilot does not depend on offline VST hosting. Ableton itself can render the experiment once safe Live control is established.
+## Downstream stem mixdown / offline experiments
+
+The first offline acceleration target is **not** Ableton-project conversion.
+
+Live already exports aligned individual tracks/selected tracks suitable for transfer to another multitrack program. Chibi should use that explicit audio boundary: export the stems/parts needed for the current mixdown/master question, preserve exact provenance, then let a scripted REAPER project test downstream candidates quickly.
+
+REAPER is the preferred first prototype because:
+- ReaScript can control project, track, FX, routing and render state;
+- render settings expose stems/master selection, time bounds, tails and other deterministic controls;
+- full-speed offline rendering is the normal fast mode;
+- render queues and render-matrix/batch workflows fit candidate search;
+- the project can remain much smaller than the original instrument/arrangement-heavy Live Set.
+
+This is valid only after a baseline-fidelity gate. Some plug-ins can behave differently when rendered offline, and a stem export may have already baked away the interaction Chibi wants to change. If the unchanged REAPER baseline does not reproduce the declared Live stem baseline closely enough, the backend is not authoritative for that experiment.
+
+`spotify/pedalboard` and `DBraun/DawDreamer` remain useful alternatives for narrower programmable plugin-graph experiments. Both are GPLv3 today, so distribution/licensing implications must be reviewed before either becomes a bundled dependency. They are not needed to validate the REAPER stem path.
+
+See [stem-mixdown-reaper.md](stem-mixdown-reaper.md).
 ## Source separation
 Demucs can be useful for analysis or when only a mixed reference/source is available. It should not be a mandatory runtime dependency and should never replace access to the real individual tracks when those tracks already exist in the Live Set.
 ## Reference tracks
@@ -111,6 +131,14 @@ An MVP should answer questions such as:
 Example output should look like a testable hypothesis, not an automatic command:
 > Kick layer X and bass layer Y coincide around 55-70 Hz on 63% of the highest master peaks. Variant B clips the kick by 1 dB and shortens the bass release slightly; this reduces peak demand by N dB while preserving level-matched tonal balance.
 This is a Chibi Audio differentiator and should be built from real pilot evidence rather than abstract DSP assumptions.
+## Product benchmark posture
+
+The ecosystem already contains credible Ableton controllers. `ahujasid/ableton-mcp`, `Producer Pal`, `bschoepke/ableton-live-mcp`, and AbletonOSC demonstrate that generic control, project inspection, broad MCP surfaces and even audio-tap feedback loops are not sufficient novelty by themselves.
+
+Chibi should periodically run a copied-Set capability/latency comparison against serious upstreams. Custom code earns its place when it provides materially better safety, project reconciliation, causal audio evidence, experiment reproducibility, throughput, or artist usefulness. Do not preserve bespoke plumbing merely because it already exists.
+
+Commercial mix-assistant products are also useful product benchmarks for editable assistant-generated processing and masking/unmasking workflows. Chibi's distinct target remains project-aware causal investigation plus reversible evidence, not a one-click quality score.
+
 ## Anti-patterns to avoid
 - giant all-powerful MCP with arbitrary code execution;
 - giant Max device containing state, networking, DSP and agent logic;

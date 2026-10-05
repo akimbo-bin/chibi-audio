@@ -2,7 +2,7 @@
 
 ## What we are building
 
-Chibi Audio is a dedicated music-production system analogous in spirit to Vision for video editing: Chibi Core remains the eventual workflow authority, while Ableton Live, local analysis tools, and workstation automation are execution surfaces.
+Chibi Audio is a dedicated music-production system analogous in spirit to Vision for video editing: Chibi Core is the durable workflow authority, while Ableton Live, validated downstream audio backends, local analysis tools, and workstation automation are execution surfaces.
 
 The objective is to make an AI worker useful inside an existing human-made production workflow. It should understand the project deeply enough to help with:
 
@@ -20,10 +20,13 @@ The objective is to make an AI worker useful inside an existing human-made produ
 - producing reversible A/B variants so the artist can choose by ear;
 - measuring LUFS, true peak, crest factor, spectral balance, stereo width, psychoacoustic descriptors and other evidence before and after changes;
 - helping with mastering while preserving intentional section-to-section dynamics;
-- running explicitly authorized, bounded iterative mix/master optimization loops that modify the Live Set, render, analyze, keep or roll back, and adapt the next experiment toward a user-defined goal;
+- running explicitly authorized, bounded iterative mix/master optimization loops that modify the appropriate execution surface, render, analyze, keep or roll back, and adapt the next experiment toward a user-defined goal;
+- exporting aligned stems/parts from Live and using a scripted REAPER project for faster downstream mixdown/master experiments when the chosen stem boundary preserves the interaction being tested;
 - learning durable production conventions and plugin knowledge rather than guessing from generic advice.
 
 The long-term analysis goal is a **synthetic hearing stack**: structured Ableton state, aligned source/track/bus/master captures, deterministic DSP measurements, psychoacoustic and masking evidence, playback-translation profiles, reference tracks, semantic audio features and real listening validation. No individual sensor is treated as musical truth. The reasoning model integrates these senses into testable production hypotheses.
+
+The product thesis is narrower than "another Ableton MCP" and narrower than "AI mastering": **understand the real project, identify a specific production problem, run a small number of controlled experiments, and return comparisons the artist can trust.** Generic DAW control, chat plumbing and broad plugin enumeration are commodity layers to reuse or benchmark, not the main differentiator.
 
 Sidechain analysis is one important example of why the stack needs both project state and audio evidence. Knowing that a compressor, Trackspacer-like spectral processor or volume shaper is routed to a kick/snare/vocal is not enough: Chibi should be able to measure the real gain or spectral-reduction envelope, its timing relative to the trigger, the residual collision after processing, any recovered downstream headroom, and whether the routing still matches the producer's intent.
 
@@ -52,7 +55,7 @@ The default production loop is:
 3. Explain the evidence and propose a bounded change or useful test range.
 4. Create a checkpoint/snapshot when a material edit is involved.
 5. Apply one coherent change.
-6. Render, meter, capture or otherwise gather A/B evidence.
+6. Render, meter, capture or otherwise gather A/B evidence through the backend appropriate to the hypothesis.
 7. Let the artist judge the musical result and, where useful, validate translation on real playback.
 8. Keep, refine, or roll back.
 
@@ -61,7 +64,7 @@ For goal-level requests where the artist explicitly authorizes iteration, Chibi 
 1. establish a baseline, references, target bundle and experiment budget;
 2. choose the highest-value evidence-backed hypothesis;
 3. checkpoint and apply one coherent reversible change;
-4. render through the authoritative Live path;
+4. render through the validated execution backend: Live for source/project/routing-sensitive work, or the REAPER stem backend for a downstream mixdown/master experiment whose baseline fidelity has already passed;
 5. analyze level-matched and as-produced results;
 6. keep the candidate only if it improves the best-so-far result without violating guardrails;
 7. roll back losing variants exactly;
@@ -80,7 +83,14 @@ The execution model is deliberately asymmetric:
 - **cross-bus workers** own relationships such as kick -> bass or vocal -> competing music;
 - all workers share durable artifact/hash/section evidence through Core rather than copying raw audio into model context.
 
-The audio plane should also be hierarchical. Use a short synchronized **bus census** first, then a **suspect-bus census** with that bus's children, then **surgical pre/post captures** only for implicated processors. Diagnostic windows should normally be a few seconds around known stress events; full-drop/full-song captures are acceptance checks for candidates that already won the fast diagnostic round. ChibiTap remains the authoritative surgical evidence path while a faster native/offline render executor is investigated for bulk work.
+The audio plane should also be hierarchical. Use a short synchronized **bus census** first, then a **suspect-bus census** with that bus's children, then **surgical pre/post captures** only for implicated processors. Diagnostic windows should normally be a few seconds around known stress events; full-drop/full-song captures are acceptance checks for candidates that already won the fast diagnostic round.
+
+There are two execution planes, and the workflow chooses deliberately between them:
+
+- **Live source-project plane:** authoritative for saved/live project identity, arrangement, routing, sidechains, automation, source-level edits, device-chain forensics and any candidate that must remain in the Live Set. ChibiTap is the surgical evidence path here.
+- **Stem mixdown plane:** Live exports an aligned, provenance-carrying stem/part package; REAPER imports that audio and runs fast scripted balance, bus-processing and mastering experiments. This is not `.als` conversion. It is valid only when the hypothesis is downstream of the export boundary and an unchanged REAPER baseline reproduces the declared Live stem baseline closely enough.
+
+A REAPER result may be the final mix/master deliverable if the artist explicitly chooses a stem-based finalization workflow. If the goal is to improve the Ableton project itself, a REAPER winner is evidence/proposal until the relevant change is reproduced and verified in Live.
 
 For loudness work in particular, Chibi should reason about a **clean-loudness knee** rather than maximizing LUFS blindly: the point where more master drive increasingly produces crest collapse, bass flattening, pumping, harshness, clipping or cross-band distortion instead of useful perceived loudness. Sidechain changes are a first-class upstream strategy in that search when time-frequency collisions are creating the loudness bottleneck.
 
@@ -102,6 +112,7 @@ A user should eventually be able to say things like:
 - "Make room for the vocal globally using Trackspacer or dynamic EQ where that is more transparent than full-band ducking, then verify the actual reduction on every target."
 - "Make an A/B where the snare also ducks the competing midrange for 80 ms, but leave the bass alone."
 - "Try three ways of getting this drop 2 dB louder and tell me which one preserves the most crest factor and stereo width."
-- "I want to mix and master this track to be loud. Work in reversible waves: change the Live Set, render, analyze against these references, keep the best version, and stop when more loudness would cost too much clarity or punch."
+- "I want to mix and master this track to be loud. Work in reversible waves, keep the best version, and stop when more loudness would cost too much clarity or punch."
+- "The production is done. Export the approved stems, try several mixdown/master approaches in REAPER overnight, and give me the best level-matched comparisons without converting or rewriting my Ableton Set."
 
 That is the product: deep production assistance around the artist's own material, not generated replacement material.

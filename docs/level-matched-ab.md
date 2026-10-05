@@ -39,3 +39,9 @@ The command prints the resulting JSON manifest. The two WAV paths recorded insid
 The first real proof used the already-finalized, sample-aligned KISS lab Locator `3` BASS pre/post captures (beats 96-160, 1,365,333 samples each). The pre capture measured about -12.91 LUFS and the post capture about -14.11 LUFS. The utility applied -1.20 dB only to the louder pre capture and 0 dB to the quieter post capture. Both derived WAVs remained 1,365,333 samples, and the verification pass measured both at -14.11 LUFS with 0.0 LU observed mismatch.
 
 That pre/post pair is a technical proof of the artifact workflow, not the final artistic A/B use case. The intended production use is baseline-versus-candidate captures from a bounded reversible experiment.
+
+## Backend neutrality
+
+Level matching is deliberately backend-neutral. The same artifact workflow can compare a Live baseline, a Live candidate, or a validated REAPER stem-backend candidate as long as the sources are aligned and provenance identifies what produced them.
+
+A successful level-match operation does **not** prove that a REAPER stem project faithfully represents the Live mix. Baseline fidelity is a separate gate performed before downstream candidates are trusted. Likewise, level matching removes a loudness-bias confound; it does not declare a musical winner.
