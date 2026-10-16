@@ -1,3 +1,5 @@
+> **Current delivery policy (OWNER_OUTCOME_DELIVERY_20261016_V1):** [Outcome delivery contract](../../docs/OUTCOME_DELIVERY_CONTRACT.md) controls work ownership, continuity, proportional specs and outcome-based reporting. Older activity/staffing quotas and repeated-history/stop-on-repairable-blocker instructions below are superseded; project requirements, technical acceptance, permissions, budgets and safety remain in force. Historical observations are not current runtime claims.
+
 # ChibiTap VST3
 
 ChibiTap is the compiled audio plane for Chibi Audio. Ableton project intelligence and bounded DAW control remain the job of the Chibi Audio Remote Script; ChibiTap is an ear, not a second workflow authority.

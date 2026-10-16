@@ -1,3 +1,5 @@
+> **Current delivery policy (OWNER_OUTCOME_DELIVERY_20261016_V1):** [Outcome delivery contract](../docs/OUTCOME_DELIVERY_CONTRACT.md) controls work ownership, continuity, proportional specs and outcome-based reporting. Older activity/staffing quotas and repeated-history/stop-on-repairable-blocker instructions below are superseded; project requirements, technical acceptance, permissions, budgets and safety remain in force. Historical observations are not current runtime claims.
+
 # Chibi Audio Live bridge
 This directory makes the Live connection reproducible instead of depending on a one-off Remote Script installed on one workstation.
 ## Boundary
